@@ -5,6 +5,7 @@ import numpy as np
 from datetime import datetime
 from tensorflow_core.python.keras import backend as K
 from sklearn.model_selection import train_test_split
+from LSTMCell import *
 
 
 # define the discriminator class
@@ -51,7 +52,7 @@ class Generator(Model):
         self.hidden_size = hidden_size
         self.batch_size = batch_size
         self.time_step = time_step
-        self.LSTM_Cell_decode = tf.keras.layers.LSTMCell(feature_dims)
+        self.LSTM_Cell_decode = LSTMCell(feature_dims)
         self.dense1 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
         self.dense2 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
         self.dense3 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
@@ -87,7 +88,8 @@ class Generator(Model):
         attention_weight = tf.concat((tf.concat((attention_weight_1, attention_weight_2), axis=1),
                                       attention_weight_3), axis=1)
         decoder_input = last_hidden_all * attention_weight  # (batch_size, self.time_step-3, hidden_size)
-        state = self.LSTM_Cell_decode.get_initial_state(batch_size=batch, dtype=tf.float32)
+        # state = self.LSTM_Cell_decode.get_initial_state(batch_size=batch, dtype=tf.float32)
+        state = self.LSTM_Cell_decode.get_initial_state(batch_size=batch, dtype=float)
         fake_input = tf.zeros(shape=[batch, 0, self.feature_dims])
         for time in range(self.time_step-3):
             output, state = self.LSTM_Cell_decode(decoder_input[:, time, :], state)

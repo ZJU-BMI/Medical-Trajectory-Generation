@@ -1,7 +1,10 @@
 import numpy as np
 from tensorflow_core.python.keras import backend as K
-from tensorflow_core.python.keras import activations, initializers
+from tensorflow_core.python.keras import activations, initializers, regularizers, constraints
 from tensorflow_core.python.keras.engine.base_layer import Layer
+from tensorflow.python.ops import array_ops
+from tensorflow.python.util import nest
+from tensorflow.python.framework import tensor_shape
 
 
 def _generate_dropout_mask(ones, rate, training=None, count=1):
@@ -19,17 +22,41 @@ def _generate_dropout_mask(ones, rate, training=None, count=1):
         training=training)
 
 
+def _generate_zero_filled_state_for_cell(cell, inputs, batch_size, dtype):
+    if inputs is not None:
+        batch_size = array_ops.shape(inputs)[0]
+        dtype = inputs.dtype
+    return _generate_zero_filled_state(batch_size, cell.state_size, dtype)
+
+
+def _generate_zero_filled_state(batch_size_tensor, state_size, dtype):
+    if batch_size_tensor is None or dtype is None:
+        raise ValueError(
+            'batch_size and dtype cannot be None while constructing initial state: '
+            'batch_size={}, dtype={}'.format(batch_size_tensor, dtype))
+
+    def create_zeros(unnested_state_size):
+        flat_dims = tensor_shape.as_shape(unnested_state_size).as_list()
+        init_state_size = [batch_size_tensor] + flat_dims
+        return array_ops.zeros(init_state_size, dtype=dtype)
+
+    if nest.is_sequence(state_size):
+        return nest.map_structure(create_zeros, state_size)
+    else:
+        return create_zeros(state_size)
+
+
 # 重新定义LSTMCell: 拆分成单个步骤计算
 class LSTMCell(Layer):
     def __init__(self,
                  units,
                  activation='tanh',
                  recurrent_activation='sigmoid',
-                 use_bias=True,
+                 use_bias=False,
                  kernel_initializer='glorot_uniform',
                  recurrent_initializer='orthogonal',
                  bias_initializer='zeros',
-                 unit_forget_bias=True,
+                 unit_forget_bias=False,
                  kernel_regularizer=None,
                  recurrent_regularizer=None,
                  bias_regularizer=None,
@@ -40,46 +67,28 @@ class LSTMCell(Layer):
                  recurrent_dropout=0.,
                  implementation=2,
                  **kwargs):
-        super(LSTMCell, self).__init__(
-            units,
-            activation=activation,
-            recurrent_activation=recurrent_activation,
-            use_bias=use_bias,
-            kernel_initializer=kernel_initializer,
-            recurrent_initializer=recurrent_initializer,
-            bias_initializer=bias_initializer,
-            unit_forget_bias=unit_forget_bias,
-            kernel_regularizer=kernel_regularizer,
-            recurrent_regularizer=recurrent_regularizer,
-            bias_regularizer=bias_regularizer,
-            kernel_constraint=kernel_constraint,
-            recurrent_constraint=recurrent_constraint,
-            bias_constraint=bias_constraint,
-            dropout=dropout,
-            recurrent_dropout=recurrent_dropout,
-            implementation=implementation,
-            **kwargs)
+        super(LSTMCell, self).__init__(**kwargs)
 
         self.units = units
-        self.activation = activation
-        self.recurrent_activation = recurrent_activation
+        self.activation = activations.get(activation)
+        self.recurrent_activation = activations.get(recurrent_activation)
         self.use_bias = use_bias
 
-        self.kernel_initializer = kernel_initializer
-        self.recurrent_initializer = recurrent_initializer
-        self.bias_initializer = bias_initializer
+        self.kernel_initializer = initializers.get(kernel_initializer)
+        self.recurrent_initializer = initializers.get(recurrent_initializer)
+        self.bias_initializer = initializers.get(bias_initializer)
         self.unit_forget_bias = unit_forget_bias
 
-        self.kernel_regularizer = kernel_regularizer
-        self.recurrent_regularizer = recurrent_regularizer
-        self.bias_regularizer = bias_regularizer
+        self.kernel_regularizer = regularizers.get(kernel_regularizer)
+        self.recurrent_regularizer = regularizers.get(recurrent_regularizer)
+        self.bias_regularizer = regularizers.get(bias_regularizer)
 
-        self.kernel_constraint = kernel_constraint
-        self.recurrent_constraint = recurrent_constraint
-        self.bias_constraint = bias_constraint
+        self.kernel_constraint = constraints.get(kernel_constraint)
+        self.recurrent_constraint = constraints.get(recurrent_constraint)
+        self.bias_constraint = constraints.get(bias_constraint)
 
-        self.dropout = dropout
-        self.recurrent_dropout = recurrent_dropout
+        self.dropout = min(1., max(0., dropout))
+        self.recurrent_dropout = min(1., max(0., recurrent_dropout))
         self.implementation = implementation
 
         self.state_size = (self.units, self.units)
@@ -110,15 +119,17 @@ class LSTMCell(Layer):
                                                constraint=self.recurrent_constraint)
         if self.use_bias:
             if self.unit_forget_bias:
+                @K.eager_learning_phase_scope
                 def bias_initializer(_, *args, **kwargs):
                     return K.concatenate([
-                        self.bias_initializer((self.units,), args, **kwargs),
+                        self.bias_initializer((self.units,), *args, **kwargs),
                         initializers.Ones()((self.units,), *args, **kwargs),
                         self.bias_initializer((self.units*2,), *args, **kwargs),
                     ])
             else:
                 bias_initializer = self.bias_initializer
-            self.bias = self.add_weight(shape=(self.units*4,),
+
+            self.bias = self.add_weight(shape=(self.units * 4,),
                                         name='bias',
                                         initializer=bias_initializer,
                                         regularizer=self.bias_regularizer,
@@ -128,7 +139,7 @@ class LSTMCell(Layer):
 
         self.kernel_i = self.kernel[:, :self.units]
         self.kernel_f = self.kernel[:, self.units:self.units*2]
-        self.kernel_c = self.kernel[:, self.units*2, self.units*3]
+        self.kernel_c = self.kernel[:, self.units*2:self.units*3]
         self.kernel_o = self.kernel[:, self.units*3:]
 
         self.recurrent_kernel_i = self.recurrent_kernel[:, :self.units]
@@ -139,7 +150,7 @@ class LSTMCell(Layer):
         if self.use_bias:
             self.bias_i = self.bias[:, :self.units]
             self.bias_f = self.bias[:, self.units:self.units*2]
-            self.bias_c = self.bias[:, self.units*2, self.units*3]
+            self.bias_c = self.bias[:, self.units*2:self.units*3]
             self.bias_o = self.bias[:, self.units*3:]
         else:
             self.bias_i = None
@@ -211,10 +222,10 @@ class LSTMCell(Layer):
             o = self.recurrent_activation(x_o + K.dot(h_tm1_o, self.recurrent_kernel_o))
 
         else:
-            if 0 < self._dropout_mask < 1:
+            if 0. < self.dropout < 1.:
                 inputs *= dp_mask[0]
             z = K.dot(inputs, self.kernel)
-            if 0 < self. recurrent_dropout < 1:
+            if 0. < self. recurrent_dropout < 1.:
                 h_tm1 *= rec_dp_mask[0]
             z += K.dot(h_tm1, self.recurrent_kernel)
 
@@ -222,8 +233,8 @@ class LSTMCell(Layer):
                 z = K.bias_add(z, self.bias)
 
             z0 = z[:, :self.units]
-            z1 = z[:, self.units, self.units*2]
-            z2 = z[:, self.units*2, self.units*3]
+            z1 = z[:, self.units:self.units*2]
+            z2 = z[:, self.units*2:self.units*3]
             z3 = z[:, self.units*3:]
 
             i = self.recurrent_activation(z0)
@@ -237,3 +248,6 @@ class LSTMCell(Layer):
                 h._use_learning_phase = True
         return h, [h, c]
 
+    def get_initial_state(self, inputs=None, batch_size=None, dtype=None):
+        return list(_generate_zero_filled_state_for_cell(
+            self, inputs, batch_size, dtype))
