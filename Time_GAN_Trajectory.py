@@ -6,6 +6,7 @@ from datetime import datetime
 from tensorflow_core.python.keras import backend as K
 from sklearn.model_selection import train_test_split
 from TimeLSTMCell_1 import *
+from bayes_opt import BayesianOptimization
 
 
 # define the discriminator class
@@ -124,8 +125,29 @@ class EncodeContext(Model):
         return context_state
 
 
-def train_step(batch_size, hidden_size, time_step, feature_dims, n_disc, train_set,
-               test_set, epochs, lambda_balance, learning_rate, l2_regularization):
+def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization):
+    train_set = np.load('train_x_.npy').reshape(-1, 6, 60)
+    # test_set = np.load('test_x_.npy').reshape(-1, 6, 60)
+    test_set = np.load('validate_x.npy').reshape(-1, 6, 60)
+    time_step = 6
+    feature_dims = train_set.shape[2]-1
+
+    train_set = DataSet(train_set)
+    test_set = DataSet(test_set)
+    train_set.epoch_completed = 0
+
+    batch_size = 64
+    # hidden_size = 2 ** (int(hidden_size))
+    # n_disc = int(n_disc)
+    epochs = 1
+    # lambda_balance = 10 ** lambda_balance
+    # learning_rate = 10 ** learning_rate
+    # l2_regularization = 10 ** l2_regularization
+
+    print('----batch_size{}---hidden_size{}---n_disc{}---epochs{}---'
+          'lambda_balance{}---learning_rate{}---l2_regularization{}---'
+          .format(batch_size, hidden_size, n_disc, epochs, lambda_balance, learning_rate, l2_regularization))
+
     discriminator = Discriminator(time_step=time_step, batch_size=batch_size)
     generator = Generator(feature_dims=feature_dims,
                           hidden_size=hidden_size,
@@ -141,16 +163,16 @@ def train_step(batch_size, hidden_size, time_step, feature_dims, n_disc, train_s
     cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 
     with tf.GradientTape(persistent=True) as gen_tape, tf.GradientTape(persistent=True) as disc_tape, tf.GradientTape() as encode_tape:
-        for epoch in range(epochs):
+        while train_set.epoch_completed < epochs:
             input_x_train = train_set.next_batch(batch_size)
             input_x_train_feature = tf.cast(input_x_train[:, :, 1:], tf.float32)
             input_t_train = input_x_train[:, :, 0].reshape(-1, 6, 1)
 
             input_t_train = tf.cast(input_t_train, tf.float32)
 
-            input_x_test = test_set.dynamic_features
-            input_x_test = tf.cast(input_x_test[:, :, 1:], tf.float32)
-            input_t_test = input_x_train[:, :, 0].reshape(-1, 6, 1)
+            input_x_test_feature = test_set.dynamic_features
+            input_x_test = tf.cast(input_x_test_feature[:, :, 1:], tf.float32)
+            input_t_test = input_x_test_feature[:, :, 0].reshape(-1, 6, 1)
 
             input_t_test = tf.cast(input_t_test, tf.float32)
             for disc in range(n_disc):
@@ -170,12 +192,12 @@ def train_step(batch_size, hidden_size, time_step, feature_dims, n_disc, train_s
 
                 gradient_disc = disc_tape.gradient(d_loss, discriminator.trainable_variables)
                 discriminator_optimizer.apply_gradients(zip(gradient_disc, discriminator.trainable_variables))
-                print('--------------dis_loss-------------', d_loss)
+                # print('--------------dis_loss-------------', d_loss)
                 # print(list(i.name for i in discriminator.trainable_variables))
 
             d_real_pre, d_fake_pre = discriminator(input_x_train_feature, fake_input)
             d_fake_pre_ = tf.reshape(d_fake_pre, [-1, 1])
-            feature_mse = tf.reduce_mean(tf.keras.losses.mae(tf.reshape(input_x_train_feature[:, 3:, :],
+            feature_mse = tf.reduce_mean(tf.keras.losses.MSE(tf.reshape(input_x_train_feature[:, 3:, :],
                                                                         [-1, feature_dims]),
                                                              tf.reshape(fake_input, [-1, feature_dims])), axis=0)
             # np.savetxt('训练时的feature_mae_{}.csv'.format(i), feature_mse)
@@ -187,8 +209,8 @@ def train_step(batch_size, hidden_size, time_step, feature_dims, n_disc, train_s
             # print(list(i.name for i in generator.trainable_variables))
             generator_optimizer.apply_gradients(zip(gradient_generator, generator.trainable_variables))
 
-            print('----------gan_loss--------------', gen_loss)
-            print("-----------mse_loss------------", mae_loss)
+            # print('----------gan_loss--------------', gen_loss)
+            # print("-----------mse_loss------------", mae_loss)
 
         context_state_test = encode_context(input_x_test)
         fake_input_test = generator([context_state_test, input_t_test])
@@ -199,47 +221,31 @@ def train_step(batch_size, hidden_size, time_step, feature_dims, n_disc, train_s
         gen_loss_ = cross_entropy(tf.ones_like(d_fake_pre_test), d_fake_pre_test)
         input_r = input_x_test[:, 3:, :]
         input_f = fake_input_test
-        np.savetxt('real_trajectory_{}.csv'.format(i), input_r.numpy().reshape(-1, feature_dims), delimiter=',')
-        np.savetxt('fake_trajectory_{}.csv'.format(i), input_f.numpy().reshape(-1, feature_dims), delimiter=',')
-        mse_loss_ = tf.keras.losses.MAE(input_r, input_f)
-        feature_mse = tf.reduce_mean(tf.keras.losses.mae(tf.reshape(input_r, [-1, feature_dims]),
+        # np.savetxt('real_trajectory_{}.csv'.format(i), input_r.numpy().reshape(-1, feature_dims), delimiter=',')
+        # np.savetxt('fake_trajectory_{}.csv'.format(i), input_f.numpy().reshape(-1, feature_dims), delimiter=',')
+        mse_loss_ = tf.keras.losses.MSE(input_r, input_f)
+        feature_mse = tf.reduce_mean(tf.keras.losses.MSE(tf.reshape(input_r, [-1, feature_dims]),
                                                          tf.reshape(input_f, [-1, feature_dims])), axis=0)
         # np.savetxt('测试时的feature_mae_{}.csv'.format(i), feature_mse)
         mse_loss_ = mse_loss_
         mse_loss_ = tf.reduce_mean(mse_loss_)
         print("d_loss:{}------gen_loss:{}-------mse_loss:{}---------".format(d_loss_, gen_loss_, mse_loss_))
-        return mse_loss_
+        return -1*mse_loss_
 
 
 if __name__ == '__main__':
-    data_set = read_gaucoma_data().dynamic_features
-    data_set = data_set.reshape(data_set.shape[0], -1)
-    data_set_y = np.zeros_like(data_set)
-    mse_all = []
-    for i in range(5):
-        train_x, test_x, train_y, test_y = train_test_split(data_set, data_set_y)
-        train_set_ = train_x.reshape(-1, 6, 60)
-        test_set_ = test_x.reshape(-1, 6, 60)
-        train_set__ = DataSet(train_set_)
-        test_set__ = DataSet(test_set_)
-
-        feature_dims = train_set_.shape[2]-1
-        mse_loss = train_step(batch_size=32,
-                              hidden_size=128,
-                              time_step=6,
-                              feature_dims=feature_dims,
-                              n_disc=10,
-                              train_set=train_set__,
-                              test_set=test_set__,
-                              epochs=100,
-                              lambda_balance=0.005,
-                              learning_rate=0.001,
-                              l2_regularization=0.001)
-
-        mse_all.append(mse_loss)
-    mse_all = np.array(mse_all)
-    print(np.mean(mse_all))
-
+    # GAN_time_LSTM_BO = BayesianOptimization(
+    #     train_step, {
+    #         'hidden_size': (5, 8),
+    #         'n_disc': (10, 20),
+    #         'lambda_balance': (-6, 0),
+    #         'learning_rate': (-5, -1),
+    #         'l2_regularization': (-5, -1),
+    #     }
+    # )
+    # GAN_time_LSTM_BO.maximize()
+    # print(GAN_time_LSTM_BO.max)
+    mse = train_step(hidden_size=128, n_disc=10, lambda_balance=0.2, learning_rate=0.0756, l2_regularization=0.000023)
 
 
 
