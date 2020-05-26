@@ -5,7 +5,7 @@ import numpy as np
 from datetime import datetime
 from tensorflow_core.python.keras import backend as K
 from sklearn.model_selection import train_test_split
-from LSTMCell import *
+from TimeLSTMCell_1 import *
 
 
 # define the discriminator class
@@ -52,15 +52,15 @@ class Generator(Model):
         self.hidden_size = hidden_size
         self.batch_size = batch_size
         self.time_step = time_step
-        self.LSTM_Cell_decode = LSTMCell(feature_dims)
+        self.LSTM_Cell_decode = TimeLSTMCell_1(feature_dims)
         self.dense1 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
         self.dense2 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
         self.dense3 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
 
     def build(self, context_state_shape):
-        shape_weight_1 = tf.TensorShape((1, 1, context_state_shape[2]))
-        shape_weight_2 = tf.TensorShape((1, 1, context_state_shape[2]))
-        shape_weight_3 = tf.TensorShape((1, 1, context_state_shape[2]))
+        shape_weight_1 = tf.TensorShape((1, 1, context_state_shape[0][2]))
+        shape_weight_2 = tf.TensorShape((1, 1, context_state_shape[0][2]))
+        shape_weight_3 = tf.TensorShape((1, 1, context_state_shape[0][2]))
 
         self.attention_weight_1 = self.add_weight(name='attention_weight_1',
                                                   shape=shape_weight_1,
@@ -78,6 +78,7 @@ class Generator(Model):
         super(Generator, self).build(context_state_shape)
 
     def call(self, context_state):  # 这里还没有考虑时间因素
+        context_state, input_t = context_state
         batch = tf.shape(context_state)[0]
         last_hidden = context_state[:, 2, :]
         last_hidden = tf.reshape(last_hidden, (-1, 1, self.hidden_size))
@@ -92,7 +93,9 @@ class Generator(Model):
         state = self.LSTM_Cell_decode.get_initial_state(batch_size=batch, dtype=float)
         fake_input = tf.zeros(shape=[batch, 0, self.feature_dims])
         for time in range(self.time_step-3):
-            output, state = self.LSTM_Cell_decode(decoder_input[:, time, :], state)
+            t = input_t[:, time, :]
+            t = tf.reshape(t, [-1, 1])
+            output, state = self.LSTM_Cell_decode([decoder_input[:, time, :], t], state)
             output_ = tf.reshape(output, [batch, 1, -1])
             fake_input = tf.concat((fake_input, output_), axis=1)
         fake_input = tf.reshape(fake_input, [-1, self.feature_dims])
@@ -140,12 +143,19 @@ def train_step(batch_size, hidden_size, time_step, feature_dims, n_disc, train_s
     with tf.GradientTape(persistent=True) as gen_tape, tf.GradientTape(persistent=True) as disc_tape, tf.GradientTape() as encode_tape:
         for epoch in range(epochs):
             input_x_train = train_set.next_batch(batch_size)
-            input_x_train_feature = tf.cast(input_x_train, tf.float32)
+            input_x_train_feature = tf.cast(input_x_train[:, :, 1:], tf.float32)
+            input_t_train = input_x_train[:, :, 0].reshape(-1, 6, 1)
+
+            input_t_train = tf.cast(input_t_train, tf.float32)
+
             input_x_test = test_set.dynamic_features
-            input_x_test = tf.cast(input_x_test, tf.float32)
+            input_x_test = tf.cast(input_x_test[:, :, 1:], tf.float32)
+            input_t_test = input_x_train[:, :, 0].reshape(-1, 6, 1)
+
+            input_t_test = tf.cast(input_t_test, tf.float32)
             for disc in range(n_disc):
                 context_state = encode_context(input_x_train_feature)
-                fake_input = generator(context_state)
+                fake_input = generator([context_state, input_t_train])
                 d_real_pre, d_fake_pre = discriminator(input_x_train_feature, fake_input)
 
                 d_fake_pre_ = tf.reshape(d_fake_pre, [-1, 1])
@@ -168,6 +178,7 @@ def train_step(batch_size, hidden_size, time_step, feature_dims, n_disc, train_s
             feature_mse = tf.reduce_mean(tf.keras.losses.mae(tf.reshape(input_x_train_feature[:, 3:, :],
                                                                         [-1, feature_dims]),
                                                              tf.reshape(fake_input, [-1, feature_dims])), axis=0)
+            # np.savetxt('训练时的feature_mae_{}.csv'.format(i), feature_mse)
             mae_loss = tf.reduce_mean(tf.keras.losses.mse(input_x_train_feature[:, 3:, :], fake_input))
             gen_loss = lambda_balance * mae_loss + cross_entropy(tf.ones_like(d_fake_pre_), d_fake_pre_)
             for weight in generator.trainable_variables:
@@ -180,7 +191,7 @@ def train_step(batch_size, hidden_size, time_step, feature_dims, n_disc, train_s
             print("-----------mse_loss------------", mae_loss)
 
         context_state_test = encode_context(input_x_test)
-        fake_input_test = generator(context_state_test)
+        fake_input_test = generator([context_state_test, input_t_test])
         d_real_pre_test, d_fake_pre_test = discriminator(input_x_test, fake_input_test)
         d_real_pre_test_loss = cross_entropy(tf.ones_like(d_real_pre_test), d_real_pre_test)
         d_fake_pre_test_loss = cross_entropy(tf.zeros_like(d_fake_pre_test), d_fake_pre_test)
@@ -207,15 +218,12 @@ if __name__ == '__main__':
     mse_all = []
     for i in range(5):
         train_x, test_x, train_y, test_y = train_test_split(data_set, data_set_y)
-        train_set_ = train_x.reshape(-1, 6, 60)[:, :, 1:]
-        test_set_ = test_x.reshape(-1, 6, 60)[:, :, 1:]
+        train_set_ = train_x.reshape(-1, 6, 60)
+        test_set_ = test_x.reshape(-1, 6, 60)
         train_set__ = DataSet(train_set_)
         test_set__ = DataSet(test_set_)
 
-        train_set_t = train_x.reshape(-1, 6, 60)[:, :, 0]
-        test_set_t = test_x.reshape(-1, 6, 60)[:, :, 0]
-
-        feature_dims = train_set_.shape[2]
+        feature_dims = train_set_.shape[2]-1
         mse_loss = train_step(batch_size=32,
                               hidden_size=128,
                               time_step=6,
