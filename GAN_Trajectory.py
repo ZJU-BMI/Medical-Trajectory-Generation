@@ -124,8 +124,8 @@ class EncodeContext(Model):
 
 def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization):
     train_set = np.load('train_x_.npy').reshape(-1, 6, 60)[:, :, 1:]
-    # test_set = np.load('test_x_.npy').reshape(-1, 6, 60)
-    test_set = np.load('validate_x.npy').reshape(-1, 6, 60)[:, :, 1:]
+    test_set = np.load('test_x.npy').reshape(-1, 6, 60)[:, :, 1:]
+    # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)[:, :, 1:]
 
     time_step = 6
     feature_dims = train_set.shape[2]
@@ -135,9 +135,10 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
     train_set.epoch_completed = 0
 
     batch_size = 64
+    epochs = 1
+
     # hidden_size = 2**(int(hidden_size))
     # n_disc = int(n_disc)
-    epochs = 1
     # lambda_balance = 10**lambda_balance
     # learning_rate = 10**learning_rate
     # l2_regularization = 10**l2_regularization
@@ -183,24 +184,24 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
 
                 gradient_disc = disc_tape.gradient(d_loss, discriminator.trainable_variables)
                 discriminator_optimizer.apply_gradients(zip(gradient_disc, discriminator.trainable_variables))
-                # print('--------------dis_loss-------------', d_loss)
-                # print(list(i.name for i in discriminator.trainable_variables))
 
             d_real_pre, d_fake_pre = discriminator(input_x_train_feature, fake_input)
             d_fake_pre_ = tf.reshape(d_fake_pre, [-1, 1])
-            feature_mse = tf.reduce_mean(tf.keras.losses.mse(tf.reshape(input_x_train_feature[:, 3:, :],
-                                                                        [-1, feature_dims]),
-                                                             tf.reshape(fake_input, [-1, feature_dims])), axis=0)
             mae_loss = tf.reduce_mean(tf.keras.losses.mse(input_x_train_feature[:, 3:, :], fake_input))
-            gen_loss = lambda_balance * mae_loss + cross_entropy(tf.ones_like(d_fake_pre_), d_fake_pre_)
+            gen_loss = mae_loss + cross_entropy(tf.ones_like(d_fake_pre_), d_fake_pre_)*lambda_balance
+
             for weight in generator.trainable_variables:
                 gen_loss += tf.keras.regularizers.l2(l2_regularization)(weight)
-            gradient_generator = gen_tape.gradient(gen_loss, generator.trainable_variables)
-            # print(list(i.name for i in generator.trainable_variables))
-            generator_optimizer.apply_gradients(zip(gradient_generator, generator.trainable_variables))
 
-            # print('----------gan_loss--------------', gen_loss)
-            # print("-----------mse_loss------------", mae_loss)
+            for weight in encode_context.trainable_variables:
+                gen_loss += tf.keras.regularizers.l2(l2_regularization)(weight)
+
+            variables = [var for var in generator.trainable_variables]
+            for var in encode_context.trainable_variables:
+                variables.append(var)
+
+            gradient_generator = gen_tape.gradient(gen_loss, variables)
+            generator_optimizer.apply_gradients(zip(gradient_generator, variables))
 
         context_state_test = encode_context(input_x_test)
         fake_input_test = generator(context_state_test)
@@ -211,15 +212,9 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
         gen_loss_ = cross_entropy(tf.ones_like(d_fake_pre_test), d_fake_pre_test)
         input_r = input_x_test[:, 3:, :]
         input_f = fake_input_test
-        # np.savetxt('real_trajectory_{}.csv'.format(i), input_r.numpy().reshape(-1, feature_dims), delimiter=',')
-        # np.savetxt('fake_trajectory_{}.csv'.format(i), input_f.numpy().reshape(-1, feature_dims), delimiter=',')
-        mse_loss_ = tf.keras.losses.mse(input_r, input_f)
-        feature_mse = tf.reduce_mean(tf.keras.losses.mae(tf.reshape(input_r, [-1, feature_dims]),
-                                                         tf.reshape(input_f, [-1, feature_dims])), axis=0)
-        # np.savetxt('测试时的feature_mae_{}.csv'.format(i), feature_mse)
-        mse_loss_ = mse_loss_
-        mse_loss_ = tf.reduce_mean(mse_loss_)
+        mse_loss_ = tf.reduce_mean(tf.keras.losses.mse(input_r, input_f))
         print("d_loss:{}------gen_loss:{}-------mse_loss:{}---------".format(d_loss_, gen_loss_, mse_loss_))
+        tf.compat.v1.reset_default_graph()
         return -1*mse_loss_
 
 
@@ -235,8 +230,12 @@ if __name__ == '__main__':
     # )
     # GAN_LSTM_BO.maximize()
     # print(GAN_LSTM_BO.max)
-    mse = train_step(hidden_size=32, n_disc=12, lambda_balance=1.0, learning_rate=0.043, l2_regularization=0.0000216)
-
+    mse_all = []
+    for i in range(50):
+        mse = train_step(hidden_size=64, n_disc=15, lambda_balance=0.808, learning_rate=0.02887, l2_regularization=0.0012)
+        mse_all.append(mse)
+        print('第{}次测试完成'.format(i))
+    print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
 
 
 

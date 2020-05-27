@@ -242,7 +242,7 @@ class TimeLSTMCell_1(Layer):
         # 计算各个门控单元的过程
         i = self.recurrent_activation(x_i + K.dot(h_tm1_i, self.recurrent_kernel_i))
         f = self.recurrent_activation(x_f + K.dot(h_tm1_f, self.recurrent_kernel_f))
-        t = self.recurrent_activation(x_t + self.activation(K.dot(input_t, self.kernel_time_t)))
+        t = self.recurrent_activation(x_t + self.recurrent_activation(K.dot(input_t, self.kernel_time_t)))
         c = f*c_tm1 + i*self.activation(x_c + K.dot(h_tm1_c, self.recurrent_kernal_c))*t
         o = self.recurrent_activation(x_o + K.dot(h_tm1_o, self.recurrent_kernel_o)+
                                       K.dot(input_t, self.kernel_time_o))

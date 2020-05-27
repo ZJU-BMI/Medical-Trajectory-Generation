@@ -99,6 +99,10 @@ def get_id_only_once():
 def load_numpy():
     data_od = np.load('patients_data_od.npy')[:, :, 1:].astype(float)
     data_os = np.load('patients_data_os.npy')[:, :, 1:].astype(float)
+    data_train_x = np.load('train_x_.npy')
+    data_validate = np.load('validate_x_.npy')
+    data_test = np.load('test_x.npy')
+    data_all_train = np.load('train_x.npy')
     print(data_od)
 
 
