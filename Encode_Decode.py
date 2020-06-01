@@ -88,9 +88,15 @@ class Decode(Model):
 
 
 def train_step(hidden_size, lambda_balance, learning_rate, l2_regularization):
-    train_set = np.load('train_x_.npy').reshape(-1, 6, 60)[:, :, 1:]
+    # train_set = np.load('train_x_.npy').reshape(-1, 6, 60)[:, :, 1:]
     # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)[:, :, 1:]
-    test_set = np.load('test_x.npy').reshape(-1, 6, 60)[:, :, 1:]
+    # test_set = np.load('test_x.npy').reshape(-1, 6, 60)[:, :, 1:]
+
+    train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)[:, :, 1:]
+    # test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)[:, :, 1:]
+    test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)[:, :, 1:]
+
+
     time_step = 6
 
     feature_dims = train_set.shape[2]
@@ -173,7 +179,7 @@ if __name__ == '__main__':
 
     mse_all = []
     for i in range(50):
-        mse = train_step(hidden_size=32,  lambda_balance=0.012, learning_rate=0.08353, l2_regularization=0.00002048)
+        mse = train_step(hidden_size=64,  lambda_balance=0.28497, learning_rate=0.068058, l2_regularization=0.0006203)
         mse_all.append(mse)
         print('第{}次测试完成'.format(i))
     print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
