@@ -137,10 +137,13 @@ def train_step(hidden_size, lambda_balance, learning_rate, l2_regularization):
     # # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)
     # test_set = np.load('test_x.npy').reshape(-1, 6, 60)
 
-    train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
-    # test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
-    test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
+    # train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
+    # # test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
+    # test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
 
+    train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)
+    test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)
+    # test_set = np.load('HF_validate_.npy').reshape(-1, 6, 30)
 
     time_step = 6
 
@@ -152,7 +155,7 @@ def train_step(hidden_size, lambda_balance, learning_rate, l2_regularization):
 
     batch_size = 64
     epochs = 1
-
+    #
     # hidden_size = 2 ** (int(hidden_size))
     # lambda_balance = 10 ** lambda_balance
     # learning_rate = 10 ** learning_rate
@@ -234,14 +237,21 @@ if __name__ == '__main__':
     # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
     # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
 
+    # mse_all = []
+    # for i in range(50):
+    #     mse = train_step(hidden_size=64,  lambda_balance=1.0, learning_rate=0.01, l2_regularization=0.0011137686)
+    #     mse_all.append(mse)
+    #     print('第{}次测试完成'.format(i))
+    # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
+    # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
+
     mse_all = []
     for i in range(50):
-        mse = train_step(hidden_size=64,  lambda_balance=1.0, learning_rate=0.01, l2_regularization=0.0011137686)
+        mse = train_step(hidden_size=128,  lambda_balance=0.0000047594, learning_rate=0.03198425115068335, l2_regularization=0.00001878718618)
         mse_all.append(mse)
         print('第{}次测试完成'.format(i))
     print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
     print('----------------mse_std:{}----------'.format(np.std(mse_all)))
-
 
 
 

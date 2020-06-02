@@ -92,9 +92,13 @@ def train_step(hidden_size, lambda_balance, learning_rate, l2_regularization):
     # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)[:, :, 1:]
     # test_set = np.load('test_x.npy').reshape(-1, 6, 60)[:, :, 1:]
 
-    train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)[:, :, 1:]
+    # train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)[:, :, 1:]
     # test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)[:, :, 1:]
-    test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)[:, :, 1:]
+    # test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)[:, :, 1:]
+
+    train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)[:, :, 1:]
+    test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)[:, :, 1:]
+    # test_set = np.load('HF_validate_.npy').reshape(-1, 6, 30)[:, :, 1:]
 
 
     time_step = 6
@@ -177,15 +181,21 @@ if __name__ == '__main__':
     # Encode_Decode_Time_BO.maximize()
     # print(Encode_Decode_Time_BO.max)
 
+    # mse_all = []
+    # for i in range(50):
+    #     mse = train_step(hidden_size=64,  lambda_balance=0.28497, learning_rate=0.068058, l2_regularization=0.0006203)
+    #     mse_all.append(mse)
+    #     print('第{}次测试完成'.format(i))
+    # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
+    # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
+
     mse_all = []
     for i in range(50):
-        mse = train_step(hidden_size=64,  lambda_balance=0.28497, learning_rate=0.068058, l2_regularization=0.0006203)
+        mse = train_step(hidden_size=128,  lambda_balance=0.5306510192184016, learning_rate=0.004296361411588365, l2_regularization=0.0003533442516103337)
         mse_all.append(mse)
         print('第{}次测试完成'.format(i))
     print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
     print('----------------mse_std:{}----------'.format(np.std(mse_all)))
-
-
 
 
 

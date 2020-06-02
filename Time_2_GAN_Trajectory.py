@@ -128,12 +128,15 @@ class EncodeContext(Model):
 def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization):
     # train_set = np.load('train_x_.npy').reshape(-1, 6, 60)
     # test_set = np.load('test_x.npy').reshape(-1, 6, 60)
-    # # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)
+    # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)
 
-    train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
-    test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
+    # train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
+    # test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
     # test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
 
+    train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)
+    test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)
+    # test_set = np.load('HF_validate_.npy').reshape(-1, 6, 30)
 
     time_step = 6
     feature_dims = train_set.shape[2]-1
@@ -145,11 +148,11 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
     batch_size = 64
     epochs = 1
 
-    hidden_size = 2 ** (int(hidden_size))
-    n_disc = int(n_disc)
-    lambda_balance = 10 ** lambda_balance
-    learning_rate = 10 ** learning_rate
-    l2_regularization = 10 ** l2_regularization
+    # hidden_size = 2 ** (int(hidden_size))
+    # n_disc = int(n_disc)
+    # lambda_balance = 10 ** lambda_balance
+    # learning_rate = 10 ** learning_rate
+    # l2_regularization = 10 ** l2_regularization
 
     print('----batch_size{}---hidden_size{}---n_disc{}---epochs{}---'
           'lambda_balance{}---learning_rate{}---l2_regularization{}---'
@@ -238,30 +241,39 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
 
 
 if __name__ == '__main__':
-    GAN_time_LSTM_BO = BayesianOptimization(
-        train_step, {
-            'hidden_size': (4, 6),
-            'n_disc': (1, 20),
-            'lambda_balance': (-6, 0),
-            'learning_rate': (-5, 0),
-            'l2_regularization': (-5, 0),
-        }
-    )
-    GAN_time_LSTM_BO.maximize(n_iter=100)
-    print(GAN_time_LSTM_BO.max)
+    # GAN_time_LSTM_BO = BayesianOptimization(
+    #     train_step, {
+    #         'hidden_size': (4, 8),
+    #         'n_disc': (1, 20),
+    #         'lambda_balance': (-6, 0),
+    #         'learning_rate': (-5, 0),
+    #         'l2_regularization': (-5, 0),
+    #     }
+    # )
+    # GAN_time_LSTM_BO.maximize(n_iter=30)
+    # print(GAN_time_LSTM_BO.max)
     # mse_all = []
-    # for i in range(50):
-    #     mse = train_step(hidden_size=32, n_disc=19, lambda_balance=0.000001768, learning_rate=0.031644, l2_regularization=0.00003406)
+    # for i in range(10):
+    #     mse = train_step(hidden_size=64, n_disc=13, lambda_balance=0.000001, learning_rate=0.0313, l2_regularization=0.00001)
     #     mse_all.append(mse)
     #     print('第{}次测试完成'.format(i))
     # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
     # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
 
+    #  青光眼
     # mse_all = []
-    # for i in range(50):
-    #     mse = train_step(hidden_size=64, n_disc=19, lambda_balance=0.0000109733, learning_rate=0.04635, l2_regularization=0.00024166)
+    # for i in range(10):
+    #     mse = train_step(hidden_size=16, n_disc=8, lambda_balance=0.0000300288, learning_rate=0.03783236, l2_regularization=0.003205565)
     #     mse_all.append(mse)
     #     print('第{}次测试完成'.format(i))
     # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
     # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
 
+    # 心衰数据
+    mse_all = []
+    for i in range(10):
+        mse = train_step(hidden_size=128, n_disc=17, lambda_balance=0.0005805789742481522, learning_rate=0.02179564802117027, l2_regularization=0.010582695884704991)
+        mse_all.append(mse)
+        print('第{}次测试完成'.format(i))
+    print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
+    print('----------------mse_std:{}----------'.format(np.std(mse_all)))

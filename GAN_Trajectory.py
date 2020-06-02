@@ -127,9 +127,13 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
     # test_set = np.load('test_x.npy').reshape(-1, 6, 60)[:, :, 1:]
     # # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)[:, :, 1:]
 
-    train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)[:, :, 1:]
-    # test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)[:, :, 1:]
-    test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)[:, :, 1:]
+    # train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)[:, :, 1:]
+    # # test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)[:, :, 1:]
+    # test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)[:, :, 1:]
+
+    train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)[:, :, 1:]
+    test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)[:, :, 1:]
+    # test_set = np.load('HF_validate_.npy').reshape(-1, 6, 30)[:, :, 1:]
 
     time_step = 6
     feature_dims = train_set.shape[2]
@@ -241,14 +245,21 @@ if __name__ == '__main__':
     #     print('第{}次测试完成'.format(i))
     # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
 
+    # mse_all = []
+    # for i in range(50):
+    #     mse = train_step(hidden_size=64, n_disc=12, lambda_balance=0.001607, learning_rate=0.02547, l2_regularization=0.0010521)
+    #     mse_all.append(mse)
+    #     print('第{}次测试完成'.format(i))
+    # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
+    # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
+
     mse_all = []
     for i in range(50):
-        mse = train_step(hidden_size=64, n_disc=12, lambda_balance=0.001607, learning_rate=0.02547, l2_regularization=0.0010521)
+        mse = train_step(hidden_size=32, n_disc=15, lambda_balance=0.000001, learning_rate=0.1, l2_regularization=0.0004803126481777589)
         mse_all.append(mse)
         print('第{}次测试完成'.format(i))
     print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
     print('----------------mse_std:{}----------'.format(np.std(mse_all)))
-
 
 
 
