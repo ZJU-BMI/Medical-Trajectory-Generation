@@ -10,7 +10,7 @@ Model:
 (5) GAN_Encode_Decode_Time(Time_LSTM_1)  
 (6) GAN_Encode_Decode_Time_2(Time_LSTM_2)  
 (7) GAN_Encode_Decode_Time_3(Time_LSTM_3)  
-(8) Actor-Critic 
+(8) Actor-Critic   
 (9) DDPG
 
 
