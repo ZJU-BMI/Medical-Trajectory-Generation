@@ -82,16 +82,16 @@ def reward(current_action, input_x_current):
     input_x_current = np.squeeze(input_x_current)
     reward_cal = np.zeros(shape=(0, 1))
     for batch_ in range(len(current_action)):
-        current_reward = stats.wasserstein_distance(current_action[batch_], input_x_current[batch_])
-        # current_reward = tf.keras.losses.mse(current_action[batch_], input_x_current[batch_])
+        # current_reward = stats.wasserstein_distance(current_action[batch_], input_x_current[batch_])
+        current_reward = tf.keras.losses.mse(current_action[batch_], input_x_current[batch_])
         reward_cal = np.concatenate((reward_cal, np.array(current_reward).reshape(-1, 1)))
     return -reward_cal
 
 
 def train_step(actor_hidden_size, critic_hidden_size, LSTM_hidden_size, n_output,
                batch_size, memory_capacity, gamma, actor_lr, critic_lr, l2_actor, l2_critic):
-    train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)
-    test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)
+    train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
+    test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
     time_step = 6
     feature_dims = train_set.shape[2] - 1
 
@@ -110,7 +110,7 @@ def train_step(actor_hidden_size, critic_hidden_size, LSTM_hidden_size, n_output
     pointer = 0
     num_episode = 1000
     epochs = 1
-    tau = 0.001
+    tau = 0.01
 
     with tf.GradientTape(persistent=True) as actor_tape, tf.GradientTape(persistent=True) as critic_tape:
         # while train_set.epoch_completed < epochs:
@@ -156,14 +156,20 @@ def train_step(actor_hidden_size, critic_hidden_size, LSTM_hidden_size, n_output
                 # memory 记忆库(若容量充足，则直接将原始数据push.若容量不充足，需要将原始的数据左移到指定的位置，再将数据push)
                 memory_ = tf.concat((state, current_action, reward_, next_state), axis=1)
                 index = pointer % memory_capacity
-                if pointer+len(memory_network) <= memory_capacity:
+                if pointer+len(memory_) <= memory_capacity:
                     memory_network[index:len(memory_)+index, :] = memory_
                     pointer += 1 * batch_size
                 else:
-                    memory_save = memory_network[pointer+batch_size-memory_capacity:pointer, :]
-                    memory_network[:memory_capacity-batch_size, :] = memory_save
-                    memory_network[memory_capacity-batch_size:, :] = memory_
-                    pointer = memory_capacity
+                    if memory_capacity == pointer:
+                        memory_save = memory_network[batch_size:, :]
+                        memory_network[:memory_capacity-batch_size] = memory_save
+                        memory_network[memory_capacity-batch_size:] = memory_
+                        pointer = memory_capacity
+                    else:
+                        memory_save = memory_network[pointer+batch_size-memory_capacity:pointer, :]
+                        memory_network[:memory_capacity-batch_size, :] = memory_save
+                        memory_network[memory_capacity-batch_size:, :] = memory_
+                        pointer = memory_capacity
 
                 if pointer >= memory_capacity:
                     softreplace = [tf.compat.v1.assign(t, (1 - tau) * t + e * tau)
@@ -205,16 +211,19 @@ def train_step(actor_hidden_size, critic_hidden_size, LSTM_hidden_size, n_output
                 episode_history.append(tf.reduce_mean(total_reward_))
 
             m = tf.keras.losses.mse(input_x_train[:, 3:, 1:], action_all)
+            # print(tf.reduce_mean(m, axis=0))
             mse = tf.reduce_mean(tf.keras.losses.mse(input_x_train[:, 3:, 1:], action_all))
             mse_all.append(mse)
             print('---episode{}---mse{}---cumulative{}-----'.format(episode, mse, tf.reduce_mean(episode_history)))
 
+    del actor_tape
+    del critic_tape
     return np.mean(mse_all)
 
 
 if __name__ == '__main__':
-    m = train_step(actor_hidden_size=64, critic_hidden_size=64, LSTM_hidden_size=16, n_output=1,
-                   batch_size=64, memory_capacity=100, gamma=0.01, actor_lr=0.001, critic_lr=0.001,
-                   l2_actor=0.001, l2_critic=0.001)
+    m = train_step(actor_hidden_size=64, critic_hidden_size=64, LSTM_hidden_size=64, n_output=1,
+                   batch_size=64, memory_capacity=10000, gamma=0.99, actor_lr=0.001, critic_lr=0.001,
+                   l2_actor=0.0001, l2_critic=0.0001)
 
     print(m)
