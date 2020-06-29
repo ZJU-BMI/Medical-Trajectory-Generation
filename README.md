@@ -11,7 +11,10 @@ Model:
 (6) GAN_Encode_Decode_Time_2(Time_LSTM_2)  
 (7) GAN_Encode_Decode_Time_3(Time_LSTM_3)  
 (8) Actor-Critic   
-(9) DDPG
+(9) DDPG  
+(10) GAIL  
+(11) GAN_VAE_Hawkes  
+(12) VAE_Hawkes  
 
 
 
