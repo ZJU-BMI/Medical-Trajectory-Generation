@@ -39,16 +39,19 @@ class Generator(Model):
         self.hidden_size = hidden_size
         self.time_step = time_step
         self.LSTM_Cell_decode = LSTMCell(hidden_size)
+        # parameters for output y
         self.dense1 = tf.keras.layers.Dense(units=self.feature_dims, activation=tf.nn.relu)
         self.dense2 = tf.keras.layers.Dense(units=self.feature_dims, activation=tf.nn.relu)
         self.dense3 = tf.keras.layers.Dense(units=self.feature_dims, activation=tf.nn.relu)
+        # parameters for z_j, mean_j, log_var_j in posterior network
         self.dense4 = tf.keras.layers.Dense(units=self.z_dims, activation=tf.nn.relu)
         self.dense5 = tf.keras.layers.Dense(units=self.z_dims, activation=tf.nn.relu)
         self.dense6 = tf.keras.layers.Dense(units=self.z_dims, activation=tf.nn.relu)
-
+        # parameters for z_j, mean_j, log_var_j in prior network
         self.dense7 = tf.keras.layers.Dense(units=self.z_dims, activation=tf.nn.relu)
         self.dense8 = tf.keras.layers.Dense(units=self.z_dims, activation=tf.nn.relu)
         self.dense9 = tf.keras.layers.Dense(units=self.z_dims, activation=tf.nn.relu)
+
     def build(self, context_state_shape):
         output_shape = tf.TensorShape((self.hidden_size, self.feature_dims))
         shape_weight_hawkes = tf.TensorShape((1, 1))
@@ -105,13 +108,13 @@ class Generator(Model):
             y_j = self.dense2(y_j)
             y_j = self.dense3(y_j)
             z_j, mean_j, log_var_j = self.inference_network(batch=batch, h_i=h_i, s_j=h_, y_j=y_j, y_j_1=y_j_)
-            y_j_ = y_j
             fake_input = tf.concat((fake_input, tf.reshape(y_j, [-1, 1, self.feature_dims])), axis=1)
             mean_all = tf.concat((mean_all, tf.reshape(mean_j, [-1, 1, self.z_dims])), axis=1)
             log_var_all = tf.concat((log_var_all, tf.reshape(log_var_j, [-1, 1, self.z_dims])), axis=1)
             z_j_, mean_j_, log_var_j_ = self.prior_network(batch=batch, h_i=h_i, s_j=h_, y_j_1=y_j_)
 
             z_all.append([z_j, z_j_])
+            y_j_ = y_j
         return tf.reshape(fake_input, [-1, (self.time_step-3), self.feature_dims]), mean_all, log_var_all, z_all
 
     def calculate_hawkes_process(self, batch, input_t, current_time_index,
@@ -255,9 +258,6 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
             input_x_train = train_set.next_batch(batch_size)
             input_x_train_feature = tf.cast(input_x_train[:, :, 1:], tf.float32)
             input_t_train = input_x_train[:, :, 0]
-            # input_x_test = test_set.dynamic_features
-            # input_x_test = tf.cast(input_x_test, tf.float32)[:, :, 1:]
-            # input_t_test = input_x_test[:, :, 0]
             for disc in range(n_disc):
                 context_state = encode_context(input_x_train_feature)
                 h_i = tf.reshape(context_state[:, -1, :], [-1, hidden_size])
@@ -281,12 +281,14 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
             d_real_pre, d_fake_pre = discriminator(input_x_train_feature, fake_input)
             d_fake_pre_ = tf.reshape(d_fake_pre, [-1, 1])
             mae_loss = tf.reduce_mean(tf.keras.losses.mse(input_x_train_feature[:, 3:, :], fake_input))
+            kl_loss_all = []
             KL = tf.keras.losses.KLDivergence()
             for m in range(len(z_all)):
                 posterior_d = z_all[m][0]
                 prior_d = z_all[m][1]
                 kl_loss = - KL(posterior_d, prior_d)
-            kl_loss_all = tf.reduce_mean(kl_loss)
+                kl_loss_all.append(kl_loss)
+            kl_loss_all = tf.reduce_mean(kl_loss_all)
             mse = tf.reduce_mean(tf.keras.losses.mse(input_x_train_feature[:, 3:, :], fake_input), axis=0)
             # print(mse)
             gen_loss = mae_loss + cross_entropy(tf.ones_like(d_fake_pre_), d_fake_pre_)*lambda_balance + kl_loss_all * imbalance_kl

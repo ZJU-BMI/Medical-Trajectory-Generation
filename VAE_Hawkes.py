@@ -102,13 +102,15 @@ class Decoder(Model):
             y_j = self.dense2(y_j)
             y_j = self.dense3(y_j)
             z_j, mean_j, log_var_j = self.inference_network(batch=batch, h_i=h_i, s_j=h_, y_j=y_j, y_j_1=y_j_)
-            y_j_ = y_j
+
             fake_input = tf.concat((fake_input, tf.reshape(y_j, [-1, 1, self.feature_dims])), axis=1)
             mean_all = tf.concat((mean_all, tf.reshape(mean_j, [-1, 1, self.z_dims])), axis=1)
             log_var_all = tf.concat((log_var_all, tf.reshape(log_var_j, [-1, 1, self.z_dims])), axis=1)
             z_j_, mean_j_, log_var_j_ = self.prior_network(batch=batch, h_i=h_i, s_j=h_, y_j_1=y_j_)
 
             z_all.append([z_j, z_j_])
+
+            y_j_ = y_j
         return tf.reshape(fake_input, [-1, (self.time_step-3), self.feature_dims]), mean_all, log_var_all, z_all
 
     def calculate_hawkes_process(self, batch, input_t, current_time_index,
@@ -156,12 +158,12 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
     # test_set = np.load('test_x.npy').reshape(-1, 6, 60)
     # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)
 
-    train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
+    # train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
     # test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
-    test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
+    # test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
 
-    # train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)
-    # test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)
+    train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)
+    test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)
     # test_set = np.load('HF_validate_.npy').reshape(-1, 6, 30)
 
     # train_set = np.load('generate_train_x_.npy').reshape(-1, 6, 30)
@@ -292,13 +294,14 @@ if __name__ == '__main__':
     # )
     # GAN_LSTM_BO.maximize()
     # print(GAN_LSTM_BO.max)
-    # mse_all = []
-    # for i in range(20):
-    #     mse = train_step(hidden_size=64, n_disc=14, lambda_balance=0.002103344076995115, learning_rate=0.022580099552851684, l2_regularization=0.0072504130661598136)
-    #     mse_all.append(mse)
-    #     print('第{}次测试完成'.format(i))
-    # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
-    # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
+    # 心衰数据集
+    mse_all = []
+    for i in range(20):
+        mse = train_step(hidden_size=32, n_disc=3, lambda_balance=0.49039341649760326, learning_rate=0.05987216325779888, l2_regularization=0.013989809816870199,imbalance_kl=0.007366975170672948, z_dims=32)
+        mse_all.append(mse)
+        print('第{}次测试完成'.format(i))
+    print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
+    print('----------------mse_std:{}----------'.format(np.std(mse_all)))
 
     # 青光眼数据
     # mse_all = []
@@ -310,10 +313,10 @@ if __name__ == '__main__':
     # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
 
    # MIMIC 数据
-    mse_all = []
-    for i in range(50):
-        mse = train_step(hidden_size=16, n_disc=10, lambda_balance=0.004981079264747266, learning_rate=0.015983116346410014, l2_regularization=0.0004785737791023319,imbalance_kl=0.0, z_dims=16)
-        mse_all.append(mse)
-        print('第{}次测试完成'.format(i))
-    print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
-    print('----------------mse_std:{}----------'.format(np.std(mse_all)))
+   #  mse_all = []
+   #  for i in range(50):
+   #      mse = train_step(hidden_size=16, n_disc=10, lambda_balance=0.004981079264747266, learning_rate=0.015983116346410014, l2_regularization=0.0004785737791023319,imbalance_kl=0.0, z_dims=16)
+   #      mse_all.append(mse)
+   #      print('第{}次测试完成'.format(i))
+   #  print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
+   #  print('----------------mse_std:{}----------'.format(np.std(mse_all)))
