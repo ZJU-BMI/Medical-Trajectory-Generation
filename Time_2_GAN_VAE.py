@@ -5,7 +5,7 @@ import numpy as np
 from datetime import datetime
 from tensorflow_core.python.keras import backend as K
 from sklearn.model_selection import train_test_split
-from TimeLSTMCell_1 import *
+from TimeLSTMCell_2 import *
 from bayes_opt import BayesianOptimization
 
 
@@ -53,7 +53,7 @@ class Generator(Model):
         self.hidden_size = hidden_size
         self.z_dims = z_dims
         self.time_step = time_step
-        self.LSTM_Cell_decode = TimeLSTMCell_1(hidden_size)
+        self.LSTM_Cell_decode = TimeLSTMCell_2(hidden_size)
         # parameters for output y
         self.dense1 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
         self.dense2 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
@@ -160,12 +160,12 @@ class EncodeContext(Model):
 
 
 def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization, imbalance_kl, z_dims):
-    # train_set = np.load('train_x_.npy').reshape(-1, 6, 60)
-    # test_set = np.load('test_x.npy').reshape(-1, 6, 60)
+    train_set = np.load('train_x_.npy').reshape(-1, 6, 60)
+    test_set = np.load('test_x.npy').reshape(-1, 6, 60)
     # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)
 
-    train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
-    test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
+    # train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
+    # test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
     # test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
 
     # train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)
@@ -182,14 +182,14 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
     batch_size = 64
     epochs = 1
 
-    hidden_size = 2**(int(hidden_size))
-    z_dims = 2 ** (int(z_dims))
-    n_disc = int(n_disc)
-    lambda_balance = 10**lambda_balance
-    learning_rate = 10**learning_rate
-    l2_regularization = 10**l2_regularization
+    # hidden_size = 2**(int(hidden_size))
+    # z_dims = 2 ** (int(z_dims))
+    # n_disc = int(n_disc)
+    # lambda_balance = 10**lambda_balance
+    # learning_rate = 10**learning_rate
+    # l2_regularization = 10**l2_regularization
     # imbalance_kl = 10 ** imbalance_kl
-    imbalance_kl = 0.0
+    # imbalance_kl = 0.0
 
     print('----batch_size{}---hidden_size{}---n_disc{}---epochs{}---'
           'lambda_balance{}---learning_rate{}---l2_regularization{}---kl_imbalance{}---z_dims{}---'
@@ -274,7 +274,6 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
         while test_set.epoch_completed < epochs:
             input_test = test_set.next_batch(batch_size)
             input_test_x = input_test[:, :, 1:]
-            input_test_x = tf.cast(input_test_x, tf.float32)
             input_test_t = np.reshape(input_test[:, :, 0], [-1, time_step, 1])
             context_state_test = encode_context(input_test_x)
             h_i_test = tf.reshape(context_state_test[:, -1, :], [-1, hidden_size])
@@ -289,43 +288,49 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
 
 
 if __name__ == '__main__':
-    GAN_time_LSTM_BO = BayesianOptimization(
-        train_step, {
-            'hidden_size': (4, 7),
-            'z_dims': (4, 7),
-            'n_disc': (1, 20),
-            'lambda_balance': (-6, 0),
-            'imbalance_kl': (-6, 0),
-            'learning_rate': (-5, -1),
-            'l2_regularization': (-5, -1),
-        }
-    )
-    GAN_time_LSTM_BO.maximize()
-    print(GAN_time_LSTM_BO.max)
-
-    # # 青光眼数据
-    # mse_all = []
-    # for i in range(50):
-    #     mse = train_step(hidden_size=16, n_disc=8, lambda_balance=0.004496559346643559, learning_rate=0.012249211300476433, l2_regularization=0.00021949121314209297,
-    #                      imbalance_kl=0.0, z_dims=16)
-    #     mse_all.append(mse)
-    #     print('第{}次测试完成'.format(i))
-    # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
-    # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
-
-    # MIMIC 数据
-    # mse_all = []
-    # for i in range(50):
-    #     mse = train_step(hidden_size=64, n_disc=19, lambda_balance=0.0000109733, learning_rate=0.04635, l2_regularization=0.00024166)
-    #     mse_all.append(mse)
-    #     print('第{}次测试完成'.format(i))
-    # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
-    # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
+    # GAN_time_LSTM_BO = BayesianOptimization(
+    #     train_step, {
+    #         'hidden_size': (4, 7),
+    #         'z_dims': (4, 7),
+    #         'n_disc': (1, 20),
+    #         'lambda_balance': (-6, 0),
+    #         'imbalance_kl': (-6, 0),
+    #         'learning_rate': (-5, -1),
+    #         'l2_regularization': (-5, -1),
+    #     }
+    # )
+    # GAN_time_LSTM_BO.maximize()
+    # print(GAN_time_LSTM_BO.max)
 
     # HF 数据
     # mse_all = []
+    # for i in range(5):
+    #     mse = train_step(hidden_size=16, n_disc=1, lambda_balance=0.00391862599066006, learning_rate=0.05871608458514343, l2_regularization=0.000018431971899495827, imbalance_kl=0.0, z_dims=16)
+    #     mse_all.append(mse)
+    #     print('第{}次测试完成'.format(i))
+    # # mse_max = max(mse_all)
+    # # mse_min = min(mse_all)
+    # # mse_all.remove(mse_max)
+    # # mse_all.remove(mse_min)
+    # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
+    # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
+
+    # 青光眼数据
+    mse_all = []
+    for i in range(10):
+        mse = train_step(hidden_size=64, n_disc=19, lambda_balance=0.008904287257655597, learning_rate=0.03538129511238838, l2_regularization=0.005745766073325893,imbalance_kl=0.0, z_dims=16)
+        mse_all.append(mse)
+        print('第{}次测试完成'.format(i))
+    mse_max = max(mse_all)
+    mse_min = min(mse_all)
+    mse_all.remove(mse_max)
+    mse_all.remove(mse_min)
+    print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
+    print('----------------mse_std:{}----------'.format(np.std(mse_all)))
+
+    # mse_all = []
     # for i in range(50):
-    #     mse = train_step(hidden_size=64, n_disc=7, lambda_balance=0.0001063950877373561, learning_rate=0.008852378324868385, l2_regularization=0.00024246799408487, z_dims=16, imbalance_kl=0.0)
+    #     mse = train_step(hidden_size=256, n_disc=1, lambda_balance=0.0000371655683, learning_rate=0.006995011786097049, l2_regularization=0.006259119778923143, z_dims=16, imbalance_kl=0.0)
     #     mse_all.append(mse)
     #     print('第{}次测试完成'.format(i))
     # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
