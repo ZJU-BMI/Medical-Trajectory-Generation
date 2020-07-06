@@ -67,6 +67,12 @@ class Decoder(Model):
                                                        initializer='uniform',
                                                        shape=shape_weight_hawkes,
                                                        trainable=True)
+
+        self.time_weight = self.add_weight(name='time_weight_parameter',
+                                           shape=shape_weight_hawkes,
+                                           initializer='uniform',
+                                           trainable=True)
+
         self.base_intensity = self.add_weight(name='base_intensity',
                                               initializer='uniform',
                                               shape=shape_weight_hawkes,
@@ -102,6 +108,11 @@ class Decoder(Model):
                                                                       trigger_parameter_beta=trigger_parameter_beta,
                                                                       base_intensity=base_intensity)
             condition_intensity_value_ = tf.tile(tf.reshape(condition_intensity_value, [batch, 1]), [1, self.hidden_size])
+            delta_t_parameters = tf.tile(self.time_weight, [self.hidden_size, 1])
+            delta_t_estimate = tf.math.log(1.0 + tf.math.exp(tf.matmul(condition_intensity_value_, delta_t_parameters)))
+            time_estimate = tf.reshape(input_t[:, current_time_index], (-1, 1)) + delta_t_estimate
+            time_estimates = tf.concat((time_estimates, time_estimate), axis=0)
+            input_t_all = tf.concat((input_t_all, tf.reshape(input_t[:,  current_time_index], (-1, 1))), axis=0)
             h = condition_intensity_value_ * h_
             state = [c, h]
             y_j = tf.reshape(output, [batch, -1])
@@ -118,7 +129,7 @@ class Decoder(Model):
             z_all.append([z_j, z_j_])
 
             y_j_ = y_j
-        return tf.reshape(fake_input, [-1, self.predicted_visit, self.feature_dims]), mean_all, log_var_all, z_all
+        return tf.reshape(fake_input, [-1, self.predicted_visit, self.feature_dims]), mean_all, log_var_all, z_all, input_t_all,time_estimates
 
     def calculate_hawkes_process(self, batch, input_t, current_time_index,
                                  trigger_parameter_beta, trigger_parameter_alpha, base_intensity):
@@ -227,18 +238,19 @@ def train_step(hidden_size, n_disc, learning_rate, l2_regularization, imbalance_
 
             context_state = encode_context(input_x_train_feature)
             h_i = tf.reshape(context_state[:, -1, :], [-1, hidden_size])
-            fake_input, mean_all, log_var_all, z_all = generator([h_i, input_t_train])
+            fake_input, mean_all, log_var_all, z_all, input_t_all, t_estimates = generator([h_i, input_t_train])
 
             l += 1
             print('第{}批次的数据训练'.format(l))
             mae_loss = tf.reduce_mean(tf.keras.losses.mse(input_x_train_feature[:, previous_visit:previous_visit+predicted_visit, :], fake_input))
+            t_mse_loss = tf.reduce_mean(tf.keras.losses.mse(input_t_all, t_estimates))
             KL = tf.keras.losses.KLDivergence()
             for m in range(len(z_all)):
                 posterior_d = z_all[m][0]
                 prior_d = z_all[m][1]
                 kl_loss = - KL(posterior_d, prior_d)
             kl_loss_all = tf.reduce_mean(kl_loss)
-            gen_loss = mae_loss + kl_loss_all * imbalance_kl
+            gen_loss = mae_loss + kl_loss_all * imbalance_kl + t_mse_loss*t_imbalance
 
             for weight in generator.trainable_variables:
                 gen_loss += tf.keras.regularizers.l2(l2_regularization)(weight)
@@ -262,7 +274,7 @@ def train_step(hidden_size, n_disc, learning_rate, l2_regularization, imbalance_
             input_t_test = input_test[:, :, 0]
             context_state_test = encode_context(input_x_test)
             h_i_test = tf.reshape(context_state_test[:, -1, :], [-1, hidden_size])
-            fake_input_test, mean_all, log_var_all, z_all = generator([h_i_test, input_t_test])
+            fake_input_test, mean_all, log_var_all, z_all, input_t_test_all, t_estimates_test_all = generator([h_i_test, input_t_test])
             generated_x_test_all = tf.concat((generated_x_test_all, fake_input_test), axis=0)
             input_x_test_all = tf.concat((input_x_test_all, input_x_test), axis=0)
 

@@ -7,16 +7,20 @@ from tensorflow_core.python.keras import backend as K
 from sklearn.model_selection import train_test_split
 from TimeLSTMCell_1 import *
 from bayes_opt import BayesianOptimization
+from scipy import stats
 
 
 # Define the generator class: get the output y according to last hidden state and attention mechanism
 class Generator(Model):
-    def __init__(self, z_dims, feature_dims, hidden_size, time_step):
+    def __init__(self, z_dims, feature_dims, hidden_size, time_step,
+                 previous_visit, predicted_visit):
         super().__init__(name='generator')
         self.feature_dims = feature_dims
         self.hidden_size = hidden_size
         self.z_dims = z_dims
         self.time_step = time_step
+        self.previous_visit = previous_visit
+        self.predicted_visit = predicted_visit
         self.LSTM_Cell_decode = TimeLSTMCell_1(hidden_size)
         # parameters for output y
         self.dense1 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
@@ -44,7 +48,7 @@ class Generator(Model):
     def call(self, context_state):  # 这里考虑了时间因素
         h_i, input_t = context_state
         batch = tf.shape(h_i)[0]
-        z_j = tf.zeros(shape=(batch,self.z_dims))
+        z_j = tf.zeros(shape=(batch, self.z_dims))
         y_j_ = tf.zeros(shape=(batch, self.feature_dims))
         h_i = tf.reshape(h_i, (-1, self.hidden_size))
         state = self.LSTM_Cell_decode.get_initial_state(batch_size=batch, dtype=float)
@@ -52,10 +56,10 @@ class Generator(Model):
         mean_all = tf.zeros(shape=(batch, 0, self.z_dims))
         log_var_all = tf.zeros(shape=[batch, 0, self.z_dims])
         z_all = []
-        for time in range(self.time_step-3):
+        for time in range(self.predicted_visit):
             input_j = tf.concat((z_j, h_i, y_j_), axis=1)
             input_j = tf.reshape(input_j, [-1, self.z_dims+self.hidden_size+self.feature_dims])
-            t = input_t[:, time+3, :]
+            t = input_t[:, time+self.previous_visit, :]
             t = tf.reshape(t, [-1, 1])
             output, state = self.LSTM_Cell_decode([input_j, t], state)
 
@@ -69,12 +73,12 @@ class Generator(Model):
             mean_all = tf.concat((mean_all, tf.reshape(mean_j, [-1, 1, self.z_dims])), axis=1)
             log_var_all = tf.concat((log_var_all, tf.reshape(log_var_j, [-1, 1, self.z_dims])), axis=1)
 
-            z_j_, mean_j_, log_var_j_ = self.prior_network(batch=batch,h_i=h_i, s_j=state[1], y_j_1=y_j_)
+            z_j_, mean_j_, log_var_j_ = self.prior_network(batch=batch, h_i=h_i, s_j=state[1], y_j_1=y_j_)
             z_all.append([z_j, z_j_])
 
             y_j_ = y_j
 
-        return tf.reshape(fake_input, [-1, self.time_step-3, self.feature_dims]), mean_all, log_var_all, z_all
+        return tf.reshape(fake_input, [-1, self.predicted_visit, self.feature_dims]), mean_all, log_var_all, z_all
 
     # inference network
     def inference_network(self, batch, h_i, s_j, y_j, y_j_1):
@@ -104,18 +108,19 @@ class Generator(Model):
 
 
 class EncodeContext(Model):
-    def __init__(self, hidden_size, time_step, batch_size):
+    def __init__(self, hidden_size, time_step, batch_size, previous_visit):
         super().__init__(name='encode_context')
         self.hidden_size = hidden_size
         self.time_step = time_step
         self.batch_size = batch_size
+        self.previous_visit = previous_visit
         self.LSTM_Cell_encode = tf.keras.layers.LSTMCell(hidden_size)
 
     def call(self, input_context):
         batch = tf.shape(input_context)[0]
         state = self.LSTM_Cell_encode.get_initial_state(batch_size=batch, dtype=tf.float32)
         context_state = np.zeros(shape=[batch, 0, self.hidden_size])
-        for time in range(self.time_step-3):
+        for time in range(self.previous_visit):
             input = input_context[:, time, :]
             output, state = self.LSTM_Cell_encode(input, state)
             output = tf.reshape(output, [batch, 1, -1])
@@ -123,7 +128,7 @@ class EncodeContext(Model):
         return context_state
 
 
-def train_step(hidden_size, n_disc, learning_rate, l2_regularization, imbalance_kl, z_dims):
+def train_step(hidden_size, n_disc, learning_rate, l2_regularization, imbalance_kl, z_dims, t_imbalance):
     # train_set = np.load('train_x_.npy').reshape(-1, 6, 60)
     # test_set = np.load('test_x.npy').reshape(-1, 6, 60)
     # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)
@@ -142,6 +147,8 @@ def train_step(hidden_size, n_disc, learning_rate, l2_regularization, imbalance_
     train_set = DataSet(train_set)
     test_set = DataSet(test_set)
     train_set.epoch_completed = 0
+    previous_visit = 1
+    predicted_visit = 5
 
     batch_size = 64
     epochs = 1
@@ -151,9 +158,9 @@ def train_step(hidden_size, n_disc, learning_rate, l2_regularization, imbalance_
     # n_disc = int(n_disc)
     # learning_rate = 10**learning_rate
     # l2_regularization = 10**l2_regularization
-
+    #
     # imbalance_kl = 10 ** imbalance_kl
-    # imbalance_kl = 0.0
+    # t_imbalance = 10 ** t_imbalance
 
     print('----batch_size{}---hidden_size{}---n_disc{}---epochs{}---'
           '---learning_rate{}---l2_regularization{}---kl_imbalance{}---z_dims{}---'
@@ -163,11 +170,14 @@ def train_step(hidden_size, n_disc, learning_rate, l2_regularization, imbalance_
     generator = Generator(feature_dims=feature_dims,
                           hidden_size=hidden_size,
                           z_dims=z_dims,
-                          time_step=time_step)
+                          time_step=time_step,
+                          previous_visit=previous_visit,
+                          predicted_visit=predicted_visit)
 
     encode_context = EncodeContext(hidden_size=hidden_size,
                                    time_step=time_step,
-                                   batch_size=batch_size)
+                                   batch_size=batch_size,
+                                   previous_visit=previous_visit)
 
     generator_optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate)
 
@@ -185,7 +195,7 @@ def train_step(hidden_size, n_disc, learning_rate, l2_regularization, imbalance_
             fake_input, mean_all, log_var_all, z_all = generator([h_i, input_t_train])
 
             print("第{}批次的数据训练完毕".format(l))
-            mae_loss = tf.reduce_mean(tf.keras.losses.mse(input_x_train_feature[:, 3:, :], fake_input))
+            mae_loss = tf.reduce_mean(tf.keras.losses.mse(input_x_train_feature[:, previous_visit:previous_visit+predicted_visit, :], fake_input))
 
             kl_loss_all = []
             KL = tf.keras.losses.KLDivergence()
@@ -212,7 +222,7 @@ def train_step(hidden_size, n_disc, learning_rate, l2_regularization, imbalance_
 
         print("开始测试！")
         input_x_test_all = tf.zeros(shape=(0, 6, feature_dims))
-        generated_x_test_all = tf.zeros(shape=(0, 3, feature_dims))
+        generated_x_test_all = tf.zeros(shape=(0, predicted_visit, feature_dims))
         while test_set.epoch_completed < epochs:
             input_test = test_set.next_batch(batch_size)
             input_test_x = input_test[:, :, 1:]
@@ -224,11 +234,21 @@ def train_step(hidden_size, n_disc, learning_rate, l2_regularization, imbalance_
             input_x_test_all = tf.concat((input_x_test_all, input_test_x), axis=0)
             generated_x_test_all = tf.concat((generated_x_test_all, fake_input_test), axis=0)
 
-        mse_loss = tf.reduce_mean(tf.keras.losses.mse(input_x_test_all[:, 3:, :], generated_x_test_all))
+        mse_loss = tf.reduce_mean(tf.keras.losses.mse(input_x_test_all[:, previous_visit:previous_visit+predicted_visit, :], generated_x_test_all))
+        r_value_all = []
+        p_value_all = []
+        for r in range(predicted_visit):
+            x_ = tf.reshape(input_x_test_all[:, previous_visit + r, :], (-1,))
+            y_ = tf.reshape(generated_x_test_all[:, r, :], (-1,))
+            r_value_ = stats.pearsonr(x_, y_)
+            r_value_all.append(r_value_[0])
+            p_value_all.append(r_value_[1])
+        print('-----------r_value{}----------'.format(np.mean(r_value_all)))
+        print('------------p_value{}-----------'.format(np.mean(p_value_all)))
         print("------mse_loss:{}---------".format(mse_loss))
         tf.compat.v1.reset_default_graph()
-        return -1*mse_loss.numpy()
-
+        # return -1*mse_loss.numpy()
+        return -1*mse_loss, np.mean(r_value_all)
 
 if __name__ == '__main__':
     # GAN_time_LSTM_BO = BayesianOptimization(
@@ -245,14 +265,14 @@ if __name__ == '__main__':
     # print(GAN_time_LSTM_BO.max)
 
     # # 青光眼数据
-    # mse_all = []
-    # for i in range(50):
-    #     mse = train_step(hidden_size=16, n_disc=8, lambda_balance=0.004496559346643559, learning_rate=0.012249211300476433, l2_regularization=0.00021949121314209297,
-    #                      imbalance_kl=0.0, z_dims=16)
-    #     mse_all.append(mse)
-    #     print('第{}次测试完成'.format(i))
-    # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
-    # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
+    mse_all = []
+    for i in range(50):
+        mse = train_step(hidden_size=16, n_disc=1, learning_rate=0.02464076443305571, l2_regularization=0.0016530133142314783,
+                         imbalance_kl=0.0006011205492926522, z_dims=32)
+        mse_all.append(mse)
+        print('第{}次测试完成'.format(i))
+    print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
+    print('----------------mse_std:{}----------'.format(np.std(mse_all)))
 
     # MIMIC 数据
     # mse_all = []
@@ -264,10 +284,10 @@ if __name__ == '__main__':
     # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
 
     # HF 数据
-    mse_all = []
-    for i in range(50):
-        mse = train_step(hidden_size=16, n_disc=6, learning_rate=0.005726946144510622, l2_regularization=0.00001, z_dims=32, imbalance_kl=0.0)
-        mse_all.append(mse)
-        print('第{}次测试完成'.format(i))
-    print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
-    print('----------------mse_std:{}----------'.format(np.std(mse_all)))
+    # mse_all = []
+    # for i in range(50):
+    #     mse = train_step(hidden_size=16, n_disc=6, learning_rate=0.005726946144510622, l2_regularization=0.00001, z_dims=32, imbalance_kl=0.0)
+    #     mse_all.append(mse)
+    #     print('第{}次测试完成'.format(i))
+    # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
+    # print('----------------mse_std:{}----------'.format(np.std(mse_all)))

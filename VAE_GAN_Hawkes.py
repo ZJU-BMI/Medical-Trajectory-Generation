@@ -6,6 +6,7 @@ from datetime import datetime
 from tensorflow_core.python.keras import backend as K
 from LSTMCell import *
 from bayes_opt import BayesianOptimization
+from scipy import stats
 
 
 # Define encode class: encode the history information to deep representation[batch_size, 3, hidden_size]
@@ -158,58 +159,81 @@ class Generator(Model):
 
 
 class Discriminator(Model):
-    def __init__(self, time_step, batch_size):
-        super().__init__(name='Discriminator')
-        self.batch_size = batch_size
+    def __init__(self, time_step, batch_size, hidden_size):
+        super().__init__(name='discriminator')
         self.time_step = time_step
+        self.batch_size = batch_size
+        self.hidden_size = hidden_size
         self.dense1 = tf.keras.layers.Flatten()
         self.dense2 = tf.keras.layers.Dense(units=1, activation=tf.nn.sigmoid)
+        self.LSTM_Cell = tf.keras.layers.LSTMCell(hidden_size)
 
-    def call(self, real_input, generated_input):
+    def call(self, real_input, fake_input):
         batch = tf.shape(real_input)[0]
-        input_same = real_input[:, :self.time_step, :]
+
+        input_same = real_input[:, :self.time_step - 3, :]
+        input_same_real = input_same
+        input_same_fake = input_same
+
         trajectory_real = []
         trajectory_fake = []
+
         trajectory_real_predict = tf.zeros(shape=[batch, 0, 1])
         trajectory_fake_predict = tf.zeros(shape=[batch, 0, 1])
-        for index in range(self.time_step-3):
+        for index in range(self.time_step - 3):
             next_real = real_input[:, index+3, :]
-            next_fake = generated_input[:, index, :]
+            next_fake = fake_input[:, index, :]
             next_real = tf.reshape(next_real, [batch, 1, -1])
             next_fake = tf.reshape(next_fake, [batch, 1, -1])
-            trajectory_step_real = tf.concat((input_same, next_real), axis=1)
-            trajectory_step_fake = tf.concat((input_same, next_fake), axis=1)
+            trajectory_step_real = tf.concat((input_same_real, next_real), axis=1)
+            trajectory_step_fake = tf.concat((input_same_fake, next_fake), axis=1)
 
             trajectory_real.append(trajectory_step_real)
             trajectory_fake.append(trajectory_step_fake)
 
-            trajectory_step_real = self.dense1(trajectory_step_real)
-            trajectory_step_fake = self.dense1(trajectory_step_fake)
+            input_same_real = trajectory_step_real
+            input_same_fake = trajectory_step_fake
 
-            trajectory_step_real_predict = self.dense2(trajectory_step_real)
-            trajectory_step_fake_predict = self.dense2(trajectory_step_fake)
+        for time_index in range(self.time_step-3):
+            trajectory_real_ = trajectory_real[time_index]
+            trajectory_fake_ = trajectory_fake[time_index]
 
-            trajectory_step_real_predict = tf.reshape(trajectory_step_real_predict, [batch, -1, 1])
-            trajectory_step_fake_predict = tf.reshape(trajectory_step_fake_predict, [batch, -1, 1])
+            state = self.LSTM_Cell.get_initial_state(batch_size=batch, dtype=tf.float32)
+            state_real = state
+            state_fake = state
+            for t in range(tf.shape(trajectory_real_)[1]):
+                input_real = trajectory_real_[:, t, :]
+                input_fake = trajectory_fake_[:, t, :]
+                output_real, state_real = self.LSTM_Cell(input_real, state_real)
+                output_fake, state_fake = self.LSTM_Cell(input_fake, state_fake)
 
-            trajectory_real_predict = tf.concat((trajectory_real_predict, trajectory_step_real_predict), axis=1)
-            trajectory_fake_predict = tf.concat((trajectory_fake_predict, trajectory_step_fake_predict), axis=1)
+            output_fake = self.dense1(output_fake)
+            output_real = self.dense1(output_real)
+
+            trajectory_step_real_pre = self.dense2(output_real)
+            trajectory_step_fake_pre = self.dense2(output_fake)
+
+            trajectory_step_real_pre = tf.reshape(trajectory_step_real_pre, [batch, -1, 1])
+            trajectory_step_fake_pre = tf.reshape(trajectory_step_fake_pre, [batch, -1, 1])
+
+            trajectory_real_predict = tf.concat((trajectory_real_predict, trajectory_step_real_pre), axis=1)
+            trajectory_fake_predict = tf.concat((trajectory_fake_predict, trajectory_step_fake_pre), axis=1)
 
         return trajectory_real_predict, trajectory_fake_predict
 
 
-def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization, imbalance_kl, z_dims):
+def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization, imbalance_kl, z_dims, t_imbalance):
     # train_set = np.load('train_x_.npy').reshape(-1, 6, 60)
     # test_set = np.load('test_x.npy').reshape(-1, 6, 60)
     # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)
 
-    train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
+    # train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
     # test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
-    test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
+    # test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
 
-    # train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)
+    train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)
     # test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)
-    # test_set = np.load('HF_validate_.npy').reshape(-1, 6, 30)
+    test_set = np.load('HF_validate_.npy').reshape(-1, 6, 30)
 
     # train_set = np.load('generate_train_x_.npy').reshape(-1, 6, 30)
     # # test_set = np.load('generate_validate_x_.npy').reshape(-1, 6, 30)
@@ -232,14 +256,14 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
     # learning_rate = 10**learning_rate
     # l2_regularization = 10**l2_regularization
     # imbalance_kl = 10 ** imbalance_kl
-    imbalance_kl = 0.0
+    # t_imbalance = 10 ** t_imbalance
 
     print('----batch_size{}---hidden_size{}---n_disc{}---epochs{}---'
-          'lambda_balance{}---learning_rate{}---l2_regularization{}--kl_imbalance{}---z_dims{}---'
+          'lambda_balance{}---learning_rate{}---l2_regularization{}--kl_imbalance{}---z_dims{}---t_imbalance{}'
           .format(batch_size, hidden_size, n_disc, epochs, lambda_balance, learning_rate, l2_regularization,
-                  imbalance_kl, z_dims))
+                  imbalance_kl, z_dims, t_imbalance))
 
-    discriminator = Discriminator(time_step=time_step, batch_size=batch_size)
+    discriminator = Discriminator(time_step=time_step, batch_size=batch_size, hidden_size=hidden_size)
     generator = Generator(feature_dims=feature_dims,
                           hidden_size=hidden_size,
                           z_dims=z_dims,
@@ -289,8 +313,7 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
                 kl_loss = - KL(posterior_d, prior_d)
                 kl_loss_all.append(kl_loss)
             kl_loss_all = tf.reduce_mean(kl_loss_all)
-            mse = tf.reduce_mean(tf.keras.losses.mse(input_x_train_feature[:, 3:, :], fake_input), axis=0)
-            # print(mse)
+
             gen_loss = mae_loss + cross_entropy(tf.ones_like(d_fake_pre_), d_fake_pre_)*lambda_balance + kl_loss_all * imbalance_kl
 
             for weight in generator.trainable_variables:
@@ -319,47 +342,41 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
             generated_x_test_all = tf.concat((generated_x_test_all, fake_input_test), axis=0)
             input_x_test_all = tf.concat((input_x_test_all, input_x_test), axis=0)
 
-            # d_real_pre_test, d_fake_pre_test = discriminator(input_x_test, fake_input_test)
-            # d_real_pre_test_loss = cross_entropy(tf.ones_like(d_real_pre_test), d_real_pre_test)
-            # d_fake_pre_test_loss = cross_entropy(tf.zeros_like(d_fake_pre_test), d_fake_pre_test)
-            # d_loss_ = d_real_pre_test_loss + d_fake_pre_test_loss
-            # gen_loss_ = cross_entropy(tf.ones_like(d_fake_pre_test), d_fake_pre_test)
-            # input_r = input_x_test[:, 3:, :]
-            # input_f = fake_input_test
-            # mse_loss_ = tf.reduce_mean(tf.keras.losses.mse(input_r, input_f))
-            # KL = tf.keras.losses.KLDivergence()
-            # for m in range(len(z_all)):
-            #     posterior_d = z_all[m][0]
-            #     prior_d = z_all[m][1]
-            #     kl_loss = - KL(posterior_d, prior_d)
-            # kl_loss_all = tf.reduce_mean(kl_loss)
-            # mse = tf.reduce_mean(tf.keras.losses.mse(input_x_test[:, 3:, :], fake_input_test), axis=0)
-            # mse_predict_all.append(mse)
-            # mse_all = tf.reduce_mean(mse_predict_all)
-            # print(mse)
         mse_loss_ = tf.reduce_mean(tf.keras.losses.mse(input_x_test_all[:, 3:, :], generated_x_test_all))
+        r_value_all = []
+        p_value_all = []
+        for r in range(time_step-3):
+            x_ = tf.reshape(input_x_test_all[:, 3+r:, :], (-1,))
+            y_ = tf.reshape(generated_x_test_all[:, r:, :], (-1, ))
+            r_value_ = stats.pearsonr(x_, y_)
+            r_value_all.append(r_value_[0])
+            p_value_all.append(r_value_[1])
+        print('-----------r_value{}----------'.format(np.mean(r_value_all)))
+        print('------------p_value{}-----------'.format(np.mean(p_value_all)))
         print("mse_loss:{}---------".format(mse_loss_))
         tf.compat.v1.reset_default_graph()
+        # return -1*mse_loss_, 0
         return -1*mse_loss_
 
 
 if __name__ == '__main__':
     # GAN_LSTM_BO = BayesianOptimization(
     #     train_step, {
-    #         'hidden_size': (4, 5),
-    #         'z_dims': (4, 5),
+    #         'hidden_size': (3, 4),
+    #         'z_dims': (3, 4),
     #         'n_disc': (1, 10),
     #         'lambda_balance': (-6, 0),
     #         'imbalance_kl': (-6, 0),
     #         'learning_rate': (-5, -1),
     #         'l2_regularization': (-5, -1),
+    #         't_imbalance': (-5, -1),
     #     }
     # )
     # GAN_LSTM_BO.maximize()
     # print(GAN_LSTM_BO.max)
     # mse_all = []
-    # for i in range(20):
-    #     mse = train_step(hidden_size=64, n_disc=14, lambda_balance=0.002103344076995115, learning_rate=0.022580099552851684, l2_regularization=0.0072504130661598136)
+    # for i in range(50):
+    #     mse = train_step(hidden_size=8, n_disc=6, lambda_balance=1.732457933064138e-05, learning_rate=0.014161847100428275, l2_regularization=0.0022652743133854325, imbalance_kl=1.0618234476153268e-06,z_dims=8,t_imbalance=1.8204842249743738e-05)
     #     mse_all.append(mse)
     #     print('第{}次测试完成'.format(i))
     # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
@@ -368,7 +385,7 @@ if __name__ == '__main__':
     # # 青光眼数据
     # mse_all = []
     # for i in range(50):
-    #     mse = train_step(hidden_size=64, n_disc=7, lambda_balance=0.0620088399050254e-6, learning_rate=0.011527648063214935, l2_regularization=0.641198423432638e-5,imbalance_kl=0.0, z_dims=16)
+    #     mse = train_step(hidden_size=8, n_disc=1, lambda_balance=.493108470001732e-05, learning_rate=0.0033840931483886667, l2_regularization=1.1767256519311603e-05,imbalance_kl=1e-6, z_dims=16,t_imbalance=1e-6)
     #     mse_all.append(mse)
     #     print('第{}次测试完成'.format(i))
     # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
@@ -376,9 +393,9 @@ if __name__ == '__main__':
 
     # MIMIC 数据
     mse_all = []
-    for i in range(10):
-        mse = train_step(hidden_size=16, n_disc=9, lambda_balance=0.150875333444718e-6, learning_rate=0.010264040860651786, l2_regularization=0.1107279067676901e-5,imbalance_kl=0.0, z_dims=16)
+    for i in range(50):
+        mse = train_step(hidden_size=8, n_disc=9, lambda_balance=2.39760549104175e-06, learning_rate=0.04296371550948975, l2_regularization=0.0008088033292719706,imbalance_kl=2.5280486584224974e-06, z_dims=8,t_imbalance=1.544148007053039e-05)
         mse_all.append(mse)
         print('第{}次测试完成'.format(i))
-    print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
-    print('----------------mse_std:{}----------'.format(np.std(mse_all)))
+        print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
+        print('----------------mse_std:{}----------'.format(np.std(mse_all)))
