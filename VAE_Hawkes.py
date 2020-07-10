@@ -84,8 +84,6 @@ class Decoder(Model):
         mean_all = tf.zeros(shape=[batch, 0, self.z_dims])
         log_var_all = tf.zeros(shape=[batch, 0, self.z_dims])
         z_all = []
-        input_t_all = tf.zeros(shape=(0, 1))
-        time_estimates = tf.zeros(shape=(0, 1))
         for j in range(self.predicted_visit):
             input_j = tf.concat((z_j, h_i, y_j_), axis=1)
             input_j = tf.reshape(input_j, [batch, self.hidden_size+self.feature_dims+self.z_dims])
@@ -165,12 +163,12 @@ def train_step(hidden_size, n_disc, learning_rate, l2_regularization, imbalance_
     # test_set = np.load('test_x.npy').reshape(-1, 6, 60)
     # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)
 
-    # train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
-    # test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
+    train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
+    test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
     # test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
 
-    train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)
-    test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)
+    # train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)
+    # test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)
     # test_set = np.load('HF_validate_.npy').reshape(-1, 6, 30)
 
     # train_set = np.load('generate_train_x_.npy').reshape(-1, 6, 30)
@@ -183,19 +181,20 @@ def train_step(hidden_size, n_disc, learning_rate, l2_regularization, imbalance_
     train_set = DataSet(train_set)
     test_set = DataSet(test_set)
     train_set.epoch_completed = 0
-    previous_visit = 1
-    predicted_visit = 5
+    previous_visit = 3
+    predicted_visit = 3
+    print('previous_visit---{}predicted_visit{}'.format(previous_visit, predicted_visit))
 
     batch_size = 64
     epochs = 1
 
-    # hidden_size = 2**(int(hidden_size))
-    # z_dims = 2 ** (int(z_dims))
-    # n_disc = int(n_disc)
-    # learning_rate = 10**learning_rate
-    # l2_regularization = 10**l2_regularization
-    # imbalance_kl = 10 ** imbalance_kl
-    # t_imbalance = 10 ** t_imbalance
+    hidden_size = 2**(int(hidden_size))
+    z_dims = 2 ** (int(z_dims))
+    n_disc = int(n_disc)
+    learning_rate = 10**learning_rate
+    l2_regularization = 10**l2_regularization
+    imbalance_kl = 10 ** imbalance_kl
+    t_imbalance = 10 ** t_imbalance
 
     print('----batch_size{}---hidden_size{}---n_disc{}---epochs{}---'
           '---learning_rate{}---l2_regularization{}--kl_imbalance{}---z_dims{}----t_imbalance{}--'
@@ -279,8 +278,8 @@ def train_step(hidden_size, n_disc, learning_rate, l2_regularization, imbalance_
         print('-----------r_value{}----------'.format(np.mean(r_value_all)))
         print('------------p_value{}-----------'.format(np.mean(p_value_all)))
         tf.compat.v1.reset_default_graph()
-        # return -1*mse_loss_
-        return -1*mse_loss_, np.mean(r_value_all)
+        return -1*mse_loss_
+        # return -1*mse_loss_, np.mean(r_value_all)
 
 if __name__ == '__main__':
     # GAN_LSTM_BO = BayesianOptimization(

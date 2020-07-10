@@ -122,12 +122,12 @@ def train_step(hidden_size, n_disc, learning_rate, l2_regularization, imbalance_
     # test_set = np.load('test_x.npy').reshape(-1, 6, 60)
     # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)
 
-    # train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
-    # test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
+    train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
+    test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
     # test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
 
-    train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)
-    test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)
+    # train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)
+    # test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)
     # test_set = np.load('HF_validate_.npy').reshape(-1, 6, 30)
 
     # train_set = np.load('generate_train_x_.npy').reshape(-1, 6, 30)
@@ -140,19 +140,20 @@ def train_step(hidden_size, n_disc, learning_rate, l2_regularization, imbalance_
     train_set = DataSet(train_set)
     test_set = DataSet(test_set)
     train_set.epoch_completed = 0
-    previous_visit = 1
-    predicted_visit = 5
+    previous_visit = 3
+    predicted_visit = 3
 
     batch_size = 64
     epochs = 1
     #
-    # hidden_size = 2**(int(hidden_size))
-    # z_dims = 2 ** (int(z_dims))
-    # n_disc = int(n_disc)
-    # learning_rate = 10**learning_rate
-    # l2_regularization = 10**l2_regularization
-    # imbalance_kl = 10 ** imbalance_kl
-    # t_imbalance = 10 ** t_imbalance
+    hidden_size = 2**(int(hidden_size))
+    z_dims = 2 ** (int(z_dims))
+    n_disc = int(n_disc)
+    learning_rate = 10**learning_rate
+    l2_regularization = 10**l2_regularization
+    imbalance_kl = 10 ** imbalance_kl
+    t_imbalance = 10 ** t_imbalance
+    print('previous_visit---{}predicted_visit{}'.format(previous_visit, predicted_visit))
 
     print('----batch_size{}---hidden_size{}---n_disc{}---epochs{}---'
           '---learning_rate{}---l2_regularization{}--kl_imbalance{}---z_dims{}---'
@@ -235,8 +236,8 @@ def train_step(hidden_size, n_disc, learning_rate, l2_regularization, imbalance_
         print('------------p_value{}-----------'.format(np.mean(p_value_all)))
         print("mse_loss:{}---------".format(mse_loss_))
         tf.compat.v1.reset_default_graph()
-        return -1*mse_loss_, np.mean(r_value_all)
-        # return -1*mse_loss_
+        # return -1*mse_loss_, np.mean(r_value_all)
+        return -1*mse_loss_
 
 
 if __name__ == '__main__':
