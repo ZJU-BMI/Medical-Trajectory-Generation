@@ -9,6 +9,12 @@ from scipy import stats
 from sklearn.preprocessing import MinMaxScaler
 
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+gpus = tf.config.experimental.list_physical_devices(device_type='GPU')
+for gpu in gpus:
+    tf.config.experimental.set_memory_growth(gpu, True)
+
+
 # Define encode class: encode the history information to deep representation[batch_size, 3, hidden_size]
 class EncodeContext(Model):
     def __init__(self, hidden_size, time_step, batch_size, previous_visit):
@@ -159,30 +165,31 @@ class Decoder(Model):
                                              trigger_parameter_beta, trigger_parameter_alpha, base_intensity):
 
         ratio_alpha_beta = trigger_parameter_alpha / trigger_parameter_beta
-        # the interval between current_time and last time
-        current_time_interval = input_t[:, current_time_index] - input_t[:, current_time_index-1]
-        current_time_interval = tf.reshape(current_time_interval, [batch, 1])
+        # the current time
+        current_time = input_t[:, current_time_index]
+        current_time = tf.reshape(current_time, [batch, -1])
 
         time_before_t = input_t[:, :current_time_index]
 
-        current_time_interval_tile = tf.tile(current_time_interval, [1, current_time_index]) # [batch, current_time_index]
+        current_time_tile = tf.tile(current_time, [1, current_time_index])  # [batch, current_time_index]
 
         # part_1: t_i - delta_t
-        time_difference_1 = time_before_t - current_time_interval_tile
+        time_difference_1 = time_before_t - current_time_tile
         trigger_kernel = tf.reduce_sum(tf.exp(trigger_parameter_beta * time_difference_1), axis=1)
         trigger_kernel = tf.reshape(trigger_kernel, [batch, 1])
 
-        condition_intensity = base_intensity + trigger_parameter_alpha * trigger_kernel # [batch, 1]
+        condition_intensity = base_intensity + trigger_parameter_alpha * trigger_kernel  # [batch, 1]
 
         # part_2: t_{j_1} - delta_t
         last_time = tf.reshape(input_t[:, current_time_index-1], [batch, 1])
-        time_difference_2 = (last_time - current_time_interval) * base_intensity
+        time_difference_2 = (last_time - current_time) * base_intensity  # [batch, 1]
 
         # part_3: t_i - t_{j-1}
         last_time_tile = tf.tile(tf.reshape(last_time, [batch, 1]), [1, current_time_index])
-        time_difference_3 = tf.reduce_sum(tf.exp(trigger_parameter_beta * (time_before_t - last_time_tile)))
+        time_difference_3 = tf.reduce_sum(tf.exp(trigger_parameter_beta * (time_before_t - last_time_tile)), axis=1)
+        time_difference_3 = tf.reshape(time_difference_3, [batch, -1])
 
-        probability_result = condition_intensity * tf.exp(time_difference_2 + ratio_alpha_beta*(trigger_kernel-time_difference_3))
+        probability_result = condition_intensity * tf.exp(time_difference_2 + ratio_alpha_beta*(trigger_kernel- time_difference_3))
 
         probability_result = tf.reshape(probability_result, [batch, 1])
         # print('f_t--------{}',format(probability_result))
@@ -310,7 +317,7 @@ def train_step(hidden_size, n_disc, learning_rate, l2_regularization, imbalance_
                 l += 1
                 print('第{}批次的数据训练'.format(l))
                 mae_loss = tf.reduce_mean(tf.keras.losses.mse(input_x_train_feature[:, previous_visit:previous_visit+predicted_visit, :], fake_input))
-                time_loss = -tf.reduce_mean(tf.math.log(time_estimates_probability_all))
+                time_loss = -tf.reduce_mean(tf.math.log(tf.clip_by_value(time_estimates_probability_all, 1e-15, 1.0)))
                 print('time_loss----------{}'.format(time_loss))
                 KL = tf.keras.losses.KLDivergence()
                 for m in range(len(z_all)):
@@ -399,7 +406,7 @@ def test_test(name):
 
 
 if __name__ == '__main__':
-    test_test('HF_test_3_3')
+    test_test('HF_test_3_3_测试_7_10')
     # GAN_LSTM_BO = BayesianOptimization(
     #     train_step, {
     #         'hidden_size': (4, 7),
@@ -416,7 +423,7 @@ if __name__ == '__main__':
     # 心衰数据集
     mse_all = []
     for i in range(50):
-        mse = train_step(hidden_size=64, n_disc=4, learning_rate=0.0051185209703627065, l2_regularization=0.00019965167339011666,imbalance_kl=0.0009767370265490443, z_dims=64, t_imbalance=0.07612041995781255)
+        mse = train_step(hidden_size=16, n_disc=16, learning_rate=0.007472646519640033, l2_regularization=4.0849237295283014e-05,imbalance_kl=1.1286624308367073e-05, z_dims=32, t_imbalance=0.0008249623190603408)
         mse_all.append(mse)
         print('第{}次测试完成'.format(i))
     print('----------------mse_average:{}----------'.format(np.mean(mse_all)))

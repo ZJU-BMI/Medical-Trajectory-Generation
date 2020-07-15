@@ -201,8 +201,8 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
     # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)
 
     train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
-    test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
-    # test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
+    # test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
+    test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
 
     # train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)
     # test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)
@@ -215,19 +215,19 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
     test_set = DataSet(test_set)
     train_set.epoch_completed = 0
     previous_visit = 3
-    predicted_visit = 2
+    predicted_visit = 1
 
-    batch_size = 64
+    batch_size = 32
     epochs = 1
 
-    hidden_size = 2**(int(hidden_size))
-    z_dims = 2 ** (int(z_dims))
-    n_disc = int(n_disc)
-    lambda_balance = 10**lambda_balance
-    learning_rate = 10**learning_rate
-    l2_regularization = 10**l2_regularization
-    imbalance_kl = 10 ** imbalance_kl
-    t_imbalance = 10 ** t_imbalance
+    # hidden_size = 2**(int(hidden_size))
+    # z_dims = 2 ** (int(z_dims))
+    # n_disc = int(n_disc)
+    # lambda_balance = 10**lambda_balance
+    # learning_rate = 10**learning_rate
+    # l2_regularization = 10**l2_regularization
+    # imbalance_kl = 10 ** imbalance_kl
+    # t_imbalance = 10 ** t_imbalance
 
     print('previous_visit---{}----predicted—_visit{}'.format(previous_visit, predicted_visit))
     print('----batch_size{}---hidden_size{}---n_disc{}---epochs{}---'
@@ -337,8 +337,8 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
         print('------------p_value{}-----------'.format(np.mean(p_value_all)))
         print("------mse_loss:{}---------".format(mse_loss))
         tf.compat.v1.reset_default_graph()
-        # return -1*mse_loss.numpy(), np.mean(r_value_all)
-        return -1*mse_loss
+        return -1*mse_loss.numpy(), np.mean(r_value_all)
+        # return -1*mse_loss
 
 
 if __name__ == '__main__':
@@ -351,6 +351,7 @@ if __name__ == '__main__':
     #         'imbalance_kl': (-6, 0),
     #         'learning_rate': (-5, -1),
     #         'l2_regularization': (-5, -1),
+    #         't_imbalance': (-6, -1)
     #     }
     # )
     # GAN_time_LSTM_BO.maximize()
@@ -367,19 +368,22 @@ if __name__ == '__main__':
     # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
 
     # MIMIC 数据
+    mse_all = []
+    r_value_all = []
+    for i in range(50):
+        mse, r_value = train_step(hidden_size=8, n_disc=7, lambda_balance=0.007510547275533875, learning_rate=0.016357346440746212, l2_regularization=0.000527042245026845,imbalance_kl=4.278988766353393e-05,z_dims=8,t_imbalance=0.0)
+        mse_all.append(mse)
+        r_value_all.append(r_value)
+    print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
+    print('----------------mse_std:{}----------'.format(np.std(mse_all)))
+    print('----------------r_value_average:{}----------'.format(np.mean(r_value_all)))
+    print('----------------r_value_std:{}----------'.format(np.std(r_value_all)))
+
+    # HF 数据
     # mse_all = []
     # for i in range(50):
-    #     mse = train_step(hidden_size=64, n_disc=19, lambda_balance=0.0000109733, learning_rate=0.04635, l2_regularization=0.00024166)
+    #     mse = train_step(hidden_size=16, n_disc=10, lambda_balance=0.0000012853797171914746, learning_rate=0.03169221116390897, l2_regularization=0.000013305878437453292, z_dims=16, imbalance_kl=0.00002208275629978935)
     #     mse_all.append(mse)
     #     print('第{}次测试完成'.format(i))
     # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
     # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
-
-    # HF 数据
-    mse_all = []
-    for i in range(50):
-        mse = train_step(hidden_size=16, n_disc=10, lambda_balance=0.0000012853797171914746, learning_rate=0.03169221116390897, l2_regularization=0.000013305878437453292, z_dims=16, imbalance_kl=0.00002208275629978935)
-        mse_all.append(mse)
-        print('第{}次测试完成'.format(i))
-    print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
-    print('----------------mse_std:{}----------'.format(np.std(mse_all)))

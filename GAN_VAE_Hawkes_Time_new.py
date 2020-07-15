@@ -8,6 +8,13 @@ from LSTMCell import *
 from bayes_opt import BayesianOptimization
 from scipy import stats
 from sklearn.preprocessing import MinMaxScaler
+import sys
+import os
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+gpus = tf.config.experimental.list_physical_devices(device_type='GPU')
+for gpu in gpus:
+    tf.config.experimental.set_memory_growth(gpu, True)
 
 
 # Define encode class: encode the history information to deep representation[batch_size, 3, hidden_size]
@@ -165,18 +172,18 @@ class Generator(Model):
     # 计算 the probability of event occurring at last+time_intervals: max(f(delta_t))
     def calculate_time_intervals_probability(self, batch, input_t, current_time_index,
                                              trigger_parameter_beta, trigger_parameter_alpha, base_intensity):
+
         ratio_alpha_beta = trigger_parameter_alpha / trigger_parameter_beta
-        # the interval between current_time and last time
-        current_time_interval = input_t[:, current_time_index] - input_t[:, current_time_index - 1]
-        current_time_interval = tf.reshape(current_time_interval, [batch, 1])
+        # the current time
+        current_time = input_t[:, current_time_index]
+        current_time = tf.reshape(current_time, [batch, -1])
 
         time_before_t = input_t[:, :current_time_index]
 
-        current_time_interval_tile = tf.tile(current_time_interval,
-                                             [1, current_time_index])  # [batch, current_time_index]
+        current_time_tile = tf.tile(current_time, [1, current_time_index])  # [batch, current_time_index]
 
         # part_1: t_i - delta_t
-        time_difference_1 = time_before_t - current_time_interval_tile
+        time_difference_1 = time_before_t - current_time_tile
         trigger_kernel = tf.reduce_sum(tf.exp(trigger_parameter_beta * time_difference_1), axis=1)
         trigger_kernel = tf.reshape(trigger_kernel, [batch, 1])
 
@@ -184,11 +191,12 @@ class Generator(Model):
 
         # part_2: t_{j_1} - delta_t
         last_time = tf.reshape(input_t[:, current_time_index - 1], [batch, 1])
-        time_difference_2 = (last_time - current_time_interval) * base_intensity
+        time_difference_2 = (last_time - current_time) * base_intensity  # [batch, 1]
 
         # part_3: t_i - t_{j-1}
         last_time_tile = tf.tile(tf.reshape(last_time, [batch, 1]), [1, current_time_index])
-        time_difference_3 = tf.reduce_sum(tf.exp(trigger_parameter_beta * (time_before_t - last_time_tile)))
+        time_difference_3 = tf.reduce_sum(tf.exp(trigger_parameter_beta * (time_before_t - last_time_tile)), axis=1)
+        time_difference_3 = tf.reshape(time_difference_3, [batch, -1])
 
         probability_result = condition_intensity * tf.exp(
             time_difference_2 + ratio_alpha_beta * (trigger_kernel - time_difference_3))
@@ -300,8 +308,8 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
     # test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
 
     train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)
-    # test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)
-    test_set = np.load('HF_validate_.npy').reshape(-1, 6, 30)
+    test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)
+    # test_set = np.load('HF_validate_.npy').reshape(-1, 6, 30)
 
     # train_set = np.load('generate_train_x_.npy').reshape(-1, 6, 30)
     # # test_set = np.load('generate_validate_x_.npy').reshape(-1, 6, 30)
@@ -336,14 +344,14 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
     batch_size = 64
     epochs = 1
 
-    hidden_size = 2**(int(hidden_size))
-    z_dims = 2 ** (int(z_dims))
-    n_disc = int(n_disc)
-    lambda_balance = 10**lambda_balance
-    learning_rate = 10**learning_rate
-    l2_regularization = 10**l2_regularization
-    imbalance_kl = 10 ** imbalance_kl
-    t_imbalance = 10 ** t_imbalance
+    # hidden_size = 2**(int(hidden_size))
+    # z_dims = 2 ** (int(z_dims))
+    # n_disc = int(n_disc)
+    # lambda_balance = 10**lambda_balance
+    # learning_rate = 10**learning_rate
+    # l2_regularization = 10**l2_regularization
+    # imbalance_kl = 10 ** imbalance_kl
+    # t_imbalance = 10 ** t_imbalance
 
     print('----batch_size{}---hidden_size{}---n_disc{}---epochs{}---'
           'lambda_balance{}---learning_rate{}---l2_regularization{}--kl_imbalance{}---z_dims{}---t_imbalance{}'
@@ -395,7 +403,7 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
             d_real_pre, d_fake_pre = discriminator(input_x_train_feature, fake_input)
             d_fake_pre_ = tf.reshape(d_fake_pre, [-1, 1])
             mae_loss = tf.reduce_mean(tf.keras.losses.mse(input_x_train_feature[:, previous_visit:previous_visit+predicted_visit, :], fake_input))
-            time_loss = -tf.reduce_mean(tf.math.log(time_estimates_probability_all))
+            time_loss = -tf.reduce_mean(tf.math.log(tf.clip_by_value(time_estimates_probability_all, 1e-15, 1.0)))
             print('time_loss----------{}'.format(time_loss))
             KL = tf.keras.losses.KLDivergence()
             for m in range(len(z_all)):
@@ -449,28 +457,53 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
         return -1*mse_loss_
 
 
+def test_test(name):
+    class Logger(object):
+        def __init__(self, filename="Default.log"):
+            self.terminal = sys.stdout
+            self.log = open(filename, "a")
+
+        def write(self, message):
+            self.terminal.write(message)
+            self.log.write(message)
+
+        def flush(self):
+            pass
+
+    path = os.path.abspath(os.path.dirname(__file__))
+    type = sys.getfilesystemencoding()
+    sys.stdout = Logger(name)
+
+    print(path)
+    print(os.path.dirname(__file__))
+    print('------------------')
+
+
 if __name__ == '__main__':
-    GAN_LSTM_BO = BayesianOptimization(
-        train_step, {
-            'hidden_size': (3, 4),
-            'z_dims': (3, 4),
-            'n_disc': (1, 10),
-            'lambda_balance': (-6, 0),
-            'imbalance_kl': (-6, 0),
-            'learning_rate': (-5, -1),
-            'l2_regularization': (-5, -1),
-            't_imbalance': (-5, -1),
-        }
-    )
-    GAN_LSTM_BO.maximize()
-    print(GAN_LSTM_BO.max)
-    # mse_all = []
-    # for i in range(50):
-    #     mse = train_step(hidden_size=8, n_disc=6, lambda_balance=1.732457933064138e-05, learning_rate=0.014161847100428275, l2_regularization=0.0022652743133854325, imbalance_kl=1.0618234476153268e-06,z_dims=8,t_imbalance=1.8204842249743738e-05)
-    #     mse_all.append(mse)
-    #     print('第{}次测试完成'.format(i))
-    # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
-    # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
+    test_test('GAN_VAE_Hawkes_Time_New_HF_test_3_3_7_12.txt')
+    # GAN_LSTM_BO = BayesianOptimization(
+    #     train_step, {
+    #         'hidden_size': (3, 5),
+    #         'z_dims': (3, 5),
+    #         'n_disc': (1, 20),
+    #         'lambda_balance': (-6, 0),
+    #         'imbalance_kl': (-6, 0),
+    #         'learning_rate': (-5, -1),
+    #         'l2_regularization': (-5, -1),
+    #         't_imbalance': (-5, -1),
+    #     }
+    # )
+    # GAN_LSTM_BO.maximize()
+    # print(GAN_LSTM_BO.max)
+    mse_all = []
+    for i in range(50):
+        mse = train_step(hidden_size=16, n_disc=5, lambda_balance=7.334671684939495e-05,
+                         learning_rate=0.0024121091663637535, l2_regularization=0.0004291786335604492,
+                         imbalance_kl=2.842050971659098e-05, z_dims=16, t_imbalance=2.5743381482711544e-05)
+        mse_all.append(mse)
+        print('第{}次测试完成'.format(i))
+    print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
+    print('----------------mse_std:{}----------'.format(np.std(mse_all)))
 
     # # 青光眼数据
     # mse_all = []

@@ -194,8 +194,8 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
     # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)
 
     train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
-    test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
-    # test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
+    # test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
+    test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
 
     # train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)
     # test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)
@@ -214,17 +214,17 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
     previous_visit = 3
     predicted_visit = 2
 
-    batch_size = 64
+    batch_size = 32
     epochs = 1
     #
-    hidden_size = 2**(int(hidden_size))
-    z_dims = 2 ** (int(z_dims))
-    n_disc = int(n_disc)
-    lambda_balance = 10**lambda_balance
-    learning_rate = 10**learning_rate
-    l2_regularization = 10**l2_regularization
-    imbalance_kl = 10 ** imbalance_kl
-    t_imbalance = 10 ** t_imbalance
+    # hidden_size = 2**(int(hidden_size))
+    # z_dims = 2 ** (int(z_dims))
+    # n_disc = int(n_disc)
+    # lambda_balance = 10**lambda_balance
+    # learning_rate = 10**learning_rate
+    # l2_regularization = 10**l2_regularization
+    # imbalance_kl = 10 ** imbalance_kl
+    # t_imbalance = 10 ** t_imbalance
 
     print('previous_visit---{}----predicted—_visit{}'.format(previous_visit, predicted_visit))
 
@@ -329,8 +329,8 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
         print('-----------r_value{}----------'.format(np.mean(r_value_all)))
         print('------------p_value{}-----------'.format(np.mean(p_value_all)))
         tf.compat.v1.reset_default_graph()
-        return -1*mse_loss_
-        # return -1*mse_loss_, np.mean(r_value_all)
+        # return -1*mse_loss_
+        return -1*mse_loss_, np.mean(r_value_all)
 
 
 if __name__ == '__main__':

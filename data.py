@@ -16,7 +16,7 @@ class DataSet(object):
     def next_batch(self, batch_size):
         if batch_size > self._num_examples or batch_size <=0:
             batch_size = self._dynamic_features.shape[0]
-        if self._batch_completed ==0:
+        if self._batch_completed == 0:
             self._shuffle()
         self._batch_completed += 1
         start = self._index_in_epoch
@@ -83,13 +83,13 @@ def read_data():
 
 
 def read_gaucoma_data():
-    dynamic_features = np.load('patients_data_od.npy')[:, :, 2:].astype(float)  # OD data
+    dynamic_features = np.load('patients_data_od.npy')[:, :, 2:].astype(np.float32)  # OD data
     feature = dynamic_features.reshape(-1, dynamic_features.shape[2])
     scaler = MinMaxScaler()
     scaler.fit(feature)
     feature_normalization = scaler.transform(feature)
     feature_normalization = feature_normalization.reshape(-1, 6, dynamic_features.shape[2])
-    feature_normalization = np.concatenate((np.load('patients_data_od.npy')[:, :, 1].reshape(-1, 6, 1).astype(float), feature_normalization), axis=2)
+    feature_normalization = np.concatenate((np.load('patients_data_od.npy')[:, :, 1].reshape(-1, 6, 1).astype(np.float32), feature_normalization), axis=2)
     return DataSet(feature_normalization)
 
 
