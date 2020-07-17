@@ -1,29 +1,24 @@
 import tensorflow as tf
 from tensorflow_core.python.keras.models import Model
-from data import DataSet, read_data, read_gaucoma_data
-import numpy as np
-from datetime import datetime
-from tensorflow_core.python.keras import backend as K
+from modify.data import DataSet
 from LSTMCell import *
 from bayes_opt import BayesianOptimization
-from scipy import stats
 
 
 # Define encode class: encode the history information to deep representation[batch_size, 3, hidden_size]
 class EncodeContext(Model):
-    def __init__(self, hidden_size, time_step, batch_size, previous_visit):
+    def __init__(self, hidden_size, time_step, batch_size):
         super().__init__(name='encode_context')
         self.hidden_size = hidden_size
         self.time_step = time_step
         self.batch_size = batch_size
-        self.previous_visit = previous_visit
         self.LSTM_Cell_encode = tf.keras.layers.LSTMCell(hidden_size)
 
     def call(self, input_context):
         batch = tf.shape(input_context)[0]
         state = self.LSTM_Cell_encode.get_initial_state(batch_size=batch, dtype=tf.float32)
         context_state = np.zeros(shape=[batch, 0, self.hidden_size])
-        for time in range(self.previous_visit):
+        for time in range(self.time_step-3):
             input = input_context[:, time, :]
             output, state = self.LSTM_Cell_encode(input, state)
             output = tf.reshape(output, [batch, 1, -1])
@@ -34,15 +29,12 @@ class EncodeContext(Model):
 # input: z_j:[batch,z_dim], h_i:[batch,hidden_size],y_j:[batch,feature_dims],y_(j_1):[batch,feature_dims]
 # output: generated_visit:[batch,k,feature_dims]
 class Generator(Model):
-    def __init__(self, feature_dims, z_dims, hidden_size, time_step, previous_visit, predicted_visit):
+    def __init__(self, feature_dims, z_dims, hidden_size, time_step):
         super(Generator, self).__init__(name='Decoder_network')
         self.feature_dims = feature_dims
         self.z_dims = z_dims
         self.hidden_size = hidden_size
         self.time_step = time_step
-        self.previous_visit = previous_visit
-        self.predicted_visit = predicted_visit
-
         self.LSTM_Cell_decode = LSTMCell(hidden_size)
         # parameters for output y
         self.dense1 = tf.keras.layers.Dense(units=self.feature_dims, activation=tf.nn.relu)
@@ -77,11 +69,6 @@ class Generator(Model):
                                               initializer='uniform',
                                               shape=shape_weight_hawkes,
                                               trainable=True)
-
-        self.time_weight = self.add_weight(name='time_weight_parameter',
-                                           shape=shape_weight_hawkes,
-                                           initializer='uniform',
-                                           trainable=True)
         super(Generator, self).build(context_state_shape)
 
     def call(self, context_state):
@@ -95,12 +82,10 @@ class Generator(Model):
         mean_all = tf.zeros(shape=[batch, 0, self.z_dims])
         log_var_all = tf.zeros(shape=[batch, 0, self.z_dims])
         z_all = []
-        input_t_all = tf.zeros(shape=(0, 1))
-        time_estimates = tf.zeros(shape=(0, 1))
-        for j in range(self.predicted_visit):
+        for j in range(self.time_step-3):
             input_j = tf.concat((z_j, h_i, y_j_), axis=1)
             input_j = tf.reshape(input_j, [batch, self.hidden_size+self.feature_dims+self.z_dims])
-            current_time_index = j+self.previous_visit
+            current_time_index = j+3
             output, state = self.LSTM_Cell_decode(input_j, state)
             c = state[0]
             h_ = state[1]
@@ -113,11 +98,6 @@ class Generator(Model):
                                                                       trigger_parameter_beta=trigger_parameter_beta,
                                                                       base_intensity=base_intensity)
             condition_intensity_value_ = tf.tile(tf.reshape(condition_intensity_value, [batch, 1]), [1, self.hidden_size])
-            delta_t_parameters = tf.tile(self.time_weight, [self.hidden_size, 1])
-            delta_t_estimate = tf.math.log(1.0 + tf.math.exp(tf.matmul(condition_intensity_value_, delta_t_parameters)))
-            time_estimate = tf.reshape(input_t[:, current_time_index], (-1, 1)) + delta_t_estimate
-            time_estimates = tf.concat((time_estimates, time_estimate), axis=0)
-            input_t_all = tf.concat((input_t_all, tf.reshape(input_t[:, current_time_index], (-1, 1))), axis=0)
             h = condition_intensity_value_ * h_
             state = [c, h]
             y_j = tf.reshape(output, [batch, -1])
@@ -132,7 +112,7 @@ class Generator(Model):
 
             z_all.append([z_j, z_j_])
             y_j_ = y_j
-        return tf.reshape(fake_input, [-1, self.predicted_visit, self.feature_dims]), mean_all, log_var_all, z_all, input_t_all, time_estimates
+        return tf.reshape(fake_input, [-1, (self.time_step-3), self.feature_dims]), mean_all, log_var_all, z_all
 
     def calculate_hawkes_process(self, batch, input_t, current_time_index,
                                  trigger_parameter_beta, trigger_parameter_alpha, base_intensity):
@@ -175,84 +155,61 @@ class Generator(Model):
 
 
 class Discriminator(Model):
-    def __init__(self, time_step, batch_size, hidden_size, previous_visit, predicted_visit):
-        super().__init__(name='discriminator')
-        self.time_step = time_step
+    def __init__(self, time_step, batch_size):
+        super().__init__(name='Discriminator')
         self.batch_size = batch_size
-        self.hidden_size = hidden_size
-        self.previous_visit = previous_visit
-        self.predicted_visit = predicted_visit
-
+        self.time_step = time_step
         self.dense1 = tf.keras.layers.Flatten()
         self.dense2 = tf.keras.layers.Dense(units=1, activation=tf.nn.sigmoid)
-        self.LSTM_Cell = tf.keras.layers.LSTMCell(hidden_size)
 
-    def call(self, real_input, fake_input):
+    def call(self, real_input, generated_input):
         batch = tf.shape(real_input)[0]
-
-        input_same = real_input[:, :self.previous_visit, :]
-        input_same_real = input_same
-        input_same_fake = input_same
-
+        input_same = real_input[:, :self.time_step, :]
         trajectory_real = []
         trajectory_fake = []
-
         trajectory_real_predict = tf.zeros(shape=[batch, 0, 1])
         trajectory_fake_predict = tf.zeros(shape=[batch, 0, 1])
-        for index in range(self.predicted_visit):
-            next_real = real_input[:, index+self.previous_visit, :]
-            next_fake = fake_input[:, index, :]
+        for index in range(self.time_step-3):
+            next_real = real_input[:, index+3, :]
+            next_fake = generated_input[:, index, :]
             next_real = tf.reshape(next_real, [batch, 1, -1])
             next_fake = tf.reshape(next_fake, [batch, 1, -1])
-            trajectory_step_real = tf.concat((input_same_real, next_real), axis=1)
-            trajectory_step_fake = tf.concat((input_same_fake, next_fake), axis=1)
+            trajectory_step_real = tf.concat((input_same, next_real), axis=1)
+            trajectory_step_fake = tf.concat((input_same, next_fake), axis=1)
 
             trajectory_real.append(trajectory_step_real)
             trajectory_fake.append(trajectory_step_fake)
 
-            input_same_real = trajectory_step_real
-            input_same_fake = trajectory_step_fake
+            trajectory_step_real = self.dense1(trajectory_step_real)
+            trajectory_step_fake = self.dense1(trajectory_step_fake)
 
-        for time_index in range(self.predicted_visit):
-            trajectory_real_ = trajectory_real[time_index]
-            trajectory_fake_ = trajectory_fake[time_index]
+            trajectory_step_real_predict = self.dense2(trajectory_step_real)
+            trajectory_step_fake_predict = self.dense2(trajectory_step_fake)
 
-            state = self.LSTM_Cell.get_initial_state(batch_size=batch, dtype=tf.float32)
-            state_real = state
-            state_fake = state
-            for t in range(tf.shape(trajectory_real_)[1]):
-                input_real = trajectory_real_[:, t, :]
-                input_fake = trajectory_fake_[:, t, :]
-                output_real, state_real = self.LSTM_Cell(input_real, state_real)
-                output_fake, state_fake = self.LSTM_Cell(input_fake, state_fake)
+            trajectory_step_real_predict = tf.reshape(trajectory_step_real_predict, [batch, -1, 1])
+            trajectory_step_fake_predict = tf.reshape(trajectory_step_fake_predict, [batch, -1, 1])
 
-            output_fake = self.dense1(output_fake)
-            output_real = self.dense1(output_real)
-
-            trajectory_step_real_pre = self.dense2(output_real)
-            trajectory_step_fake_pre = self.dense2(output_fake)
-
-            trajectory_step_real_pre = tf.reshape(trajectory_step_real_pre, [batch, -1, 1])
-            trajectory_step_fake_pre = tf.reshape(trajectory_step_fake_pre, [batch, -1, 1])
-
-            trajectory_real_predict = tf.concat((trajectory_real_predict, trajectory_step_real_pre), axis=1)
-            trajectory_fake_predict = tf.concat((trajectory_fake_predict, trajectory_step_fake_pre), axis=1)
+            trajectory_real_predict = tf.concat((trajectory_real_predict, trajectory_step_real_predict), axis=1)
+            trajectory_fake_predict = tf.concat((trajectory_fake_predict, trajectory_step_fake_predict), axis=1)
 
         return trajectory_real_predict, trajectory_fake_predict
 
 
-def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization, imbalance_kl, z_dims, t_imbalance):
+def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization, imbalance_kl, z_dims):
     # train_set = np.load('train_x_.npy').reshape(-1, 6, 60)
     # test_set = np.load('test_x.npy').reshape(-1, 6, 60)
     # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)
+    # print("青光眼数据")
 
     train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
-    # test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
-    test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
+    test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
+    # test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
+    print('MIMIC数据')
 
     # train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)
     # test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)
     # test_set = np.load('HF_validate_.npy').reshape(-1, 6, 30)
+    # print('HF 数据')
 
     # train_set = np.load('generate_train_x_.npy').reshape(-1, 6, 30)
     # # test_set = np.load('generate_validate_x_.npy').reshape(-1, 6, 30)
@@ -264,38 +221,33 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
     train_set = DataSet(train_set)
     test_set = DataSet(test_set)
     train_set.epoch_completed = 0
-    previous_visit = 3
-    predicted_visit = 2
 
-    batch_size = 32
+    batch_size = 64
     epochs = 1
 
-    # hidden_size = 2**(int(hidden_size))
-    # z_dims = 2 ** (int(z_dims))
-    # n_disc = int(n_disc)
-    # lambda_balance = 10**lambda_balance
-    # learning_rate = 10**learning_rate
-    # l2_regularization = 10**l2_regularization
+    hidden_size = 2**(int(hidden_size))
+    z_dims = 2 ** (int(z_dims))
+    n_disc = int(n_disc)
+    lambda_balance = 10**lambda_balance
+    learning_rate = 10**learning_rate
+    l2_regularization = 10**l2_regularization
     # imbalance_kl = 10 ** imbalance_kl
-    # t_imbalance = 10 ** t_imbalance
-    print('previous_visit---{}----predicted—_visit{}'.format(previous_visit, predicted_visit))
-    print('----batch_size{}---hidden_size{}---n_disc{}---epochs{}---'
-          'lambda_balance{}---learning_rate{}---l2_regularization{}--kl_imbalance{}---z_dims{}---t_imbalance{}'
-          .format(batch_size, hidden_size, n_disc, epochs, lambda_balance, learning_rate, l2_regularization,
-                  imbalance_kl, z_dims, t_imbalance))
+    imbalance_kl = 0.0
 
-    discriminator = Discriminator(time_step=time_step, batch_size=batch_size, hidden_size=hidden_size,previous_visit=previous_visit, predicted_visit=predicted_visit)
+    print('----batch_size{}---hidden_size{}---n_disc{}---epochs{}---'
+          'lambda_balance{}---learning_rate{}---l2_regularization{}--kl_imbalance{}---z_dims{}---'
+          .format(batch_size, hidden_size, n_disc, epochs, lambda_balance, learning_rate, l2_regularization,
+                  imbalance_kl, z_dims))
+
+    discriminator = Discriminator(time_step=time_step, batch_size=batch_size)
     generator = Generator(feature_dims=feature_dims,
                           hidden_size=hidden_size,
                           z_dims=z_dims,
-                          time_step=time_step,
-                          previous_visit=previous_visit,
-                          predicted_visit=predicted_visit)
+                          time_step=time_step)
 
     encode_context = EncodeContext(hidden_size=hidden_size,
                                    time_step=time_step,
-                                   batch_size=batch_size,
-                                   previous_visit=previous_visit)
+                                   batch_size=batch_size)
 
     generator_optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate)
     discriminator_optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate)
@@ -309,7 +261,7 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
             for disc in range(n_disc):
                 context_state = encode_context(input_x_train_feature)
                 h_i = tf.reshape(context_state[:, -1, :], [-1, hidden_size])
-                fake_input, mean_all, log_var_all, z_all, time_all_input, time_all_estimate = generator([h_i, input_t_train])
+                fake_input, mean_all, log_var_all, z_all = generator([h_i, input_t_train])
                 d_real_pre, d_fake_pre = discriminator(input_x_train_feature, fake_input)
 
                 d_fake_pre_ = tf.reshape(d_fake_pre, [-1, 1])
@@ -328,8 +280,7 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
             print('第{}批次的数据训练'.format(l))
             d_real_pre, d_fake_pre = discriminator(input_x_train_feature, fake_input)
             d_fake_pre_ = tf.reshape(d_fake_pre, [-1, 1])
-            mae_loss = tf.reduce_mean(tf.keras.losses.mse(input_x_train_feature[:, previous_visit:previous_visit+predicted_visit, :], fake_input))
-            t_mse_loss = tf.reduce_mean(tf.keras.losses.mse(time_all_input, time_all_estimate))
+            mae_loss = tf.reduce_mean(tf.keras.losses.mse(input_x_train_feature[:, 3:, :], fake_input))
             kl_loss_all = []
             KL = tf.keras.losses.KLDivergence()
             for m in range(len(z_all)):
@@ -338,8 +289,9 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
                 kl_loss = - KL(posterior_d, prior_d)
                 kl_loss_all.append(kl_loss)
             kl_loss_all = tf.reduce_mean(kl_loss_all)
-
-            gen_loss = mae_loss + cross_entropy(tf.ones_like(d_fake_pre_), d_fake_pre_)*lambda_balance + kl_loss_all * imbalance_kl + t_mse_loss * t_imbalance
+            mse = tf.reduce_mean(tf.keras.losses.mse(input_x_train_feature[:, 3:, :], fake_input), axis=0)
+            # print(mse)
+            gen_loss = mae_loss + cross_entropy(tf.ones_like(d_fake_pre_), d_fake_pre_)*lambda_balance + kl_loss_all * imbalance_kl
 
             for weight in generator.trainable_variables:
                 gen_loss += tf.keras.regularizers.l2(l2_regularization)(weight)
@@ -356,52 +308,58 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
 
         print('开始测试！')
         input_x_test_all = tf.zeros(shape=(0, 6, feature_dims))
-        generated_x_test_all = tf.zeros(shape=(0, predicted_visit, feature_dims))
+        generated_x_test_all = tf.zeros(shape=(0, 3, feature_dims))
         while test_set.epoch_completed < epochs:
             input_test = test_set.next_batch(batch_size)
             input_x_test = input_test[:, :, 1:]
             input_t_test = input_test[:, :, 0]
             context_state_test = encode_context(input_x_test)
             h_i_test = tf.reshape(context_state_test[:, -1, :], [-1, hidden_size])
-            fake_input_test, mean_all, log_var_all, z_all, time_all_input_test, time_estimates_test = generator([h_i_test, input_t_test])
+            fake_input_test, mean_all, log_var_all, z_all = generator([h_i_test, input_t_test])
             generated_x_test_all = tf.concat((generated_x_test_all, fake_input_test), axis=0)
             input_x_test_all = tf.concat((input_x_test_all, input_x_test), axis=0)
 
-        mse_loss_ = tf.reduce_mean(tf.keras.losses.mse(input_x_test_all[:, previous_visit:previous_visit+predicted_visit, :], generated_x_test_all))
-        r_value_all = []
-        p_value_all = []
-        for r in range(predicted_visit):
-            x_ = tf.reshape(input_x_test_all[:, previous_visit+r, :], (-1,))
-            y_ = tf.reshape(generated_x_test_all[:, r, :], (-1, ))
-            r_value_ = stats.pearsonr(x_, y_)
-            r_value_all.append(r_value_[0])
-            p_value_all.append(r_value_[1])
-        print('-----------r_value{}----------'.format(np.mean(r_value_all)))
-        print('------------p_value{}-----------'.format(np.mean(p_value_all)))
+            # d_real_pre_test, d_fake_pre_test = discriminator(input_x_test, fake_input_test)
+            # d_real_pre_test_loss = cross_entropy(tf.ones_like(d_real_pre_test), d_real_pre_test)
+            # d_fake_pre_test_loss = cross_entropy(tf.zeros_like(d_fake_pre_test), d_fake_pre_test)
+            # d_loss_ = d_real_pre_test_loss + d_fake_pre_test_loss
+            # gen_loss_ = cross_entropy(tf.ones_like(d_fake_pre_test), d_fake_pre_test)
+            # input_r = input_x_test[:, 3:, :]
+            # input_f = fake_input_test
+            # mse_loss_ = tf.reduce_mean(tf.keras.losses.mse(input_r, input_f))
+            # KL = tf.keras.losses.KLDivergence()
+            # for m in range(len(z_all)):
+            #     posterior_d = z_all[m][0]
+            #     prior_d = z_all[m][1]
+            #     kl_loss = - KL(posterior_d, prior_d)
+            # kl_loss_all = tf.reduce_mean(kl_loss)
+            # mse = tf.reduce_mean(tf.keras.losses.mse(input_x_test[:, 3:, :], fake_input_test), axis=0)
+            # mse_predict_all.append(mse)
+            # mse_all = tf.reduce_mean(mse_predict_all)
+            # print(mse)
+        mse_loss_ = tf.reduce_mean(tf.keras.losses.mse(input_x_test_all[:, 3:, :], generated_x_test_all))
         print("mse_loss:{}---------".format(mse_loss_))
         tf.compat.v1.reset_default_graph()
-        return -1*mse_loss_, np.mean(r_value_all)
-        # return -1*mse_loss_
+        return -1*mse_loss_
 
 
 if __name__ == '__main__':
-    # GAN_LSTM_BO = BayesianOptimization(
-    #     train_step, {
-    #         'hidden_size': (3, 4),
-    #         'z_dims': (3, 4),
-    #         'n_disc': (1, 10),
-    #         'lambda_balance': (-6, 0),
-    #         'imbalance_kl': (-6, 0),
-    #         'learning_rate': (-5, -1),
-    #         'l2_regularization': (-5, -1),
-    #         't_imbalance': (-5, -1),
-    #     }
-    # )
-    # GAN_LSTM_BO.maximize()
-    # print(GAN_LSTM_BO.max)
+    GAN_LSTM_BO = BayesianOptimization(
+        train_step, {
+            'hidden_size': (4, 5),
+            'z_dims': (4, 5),
+            'n_disc': (1, 10),
+            'lambda_balance': (-6, 0),
+            'imbalance_kl': (-6, 0),
+            'learning_rate': (-5, -1),
+            'l2_regularization': (-5, -1),
+        }
+    )
+    GAN_LSTM_BO.maximize()
+    print(GAN_LSTM_BO.max)
     # mse_all = []
-    # for i in range(50):
-    #     mse = train_step(hidden_size=8, n_disc=6, lambda_balance=1.732457933064138e-05, learning_rate=0.014161847100428275, l2_regularization=0.0022652743133854325, imbalance_kl=1.0618234476153268e-06,z_dims=8,t_imbalance=1.8204842249743738e-05)
+    # for i in range(20):
+    #     mse = train_step(hidden_size=64, n_disc=14, lambda_balance=0.002103344076995115, learning_rate=0.022580099552851684, l2_regularization=0.0072504130661598136)
     #     mse_all.append(mse)
     #     print('第{}次测试完成'.format(i))
     # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
@@ -410,17 +368,17 @@ if __name__ == '__main__':
     # # 青光眼数据
     # mse_all = []
     # for i in range(50):
-    #     mse = train_step(hidden_size=8, n_disc=1, lambda_balance=.493108470001732e-05, learning_rate=0.0033840931483886667, l2_regularization=1.1767256519311603e-05,imbalance_kl=1e-6, z_dims=16,t_imbalance=1e-6)
+    #     mse = train_step(hidden_size=64, n_disc=7, lambda_balance=0.0620088399050254e-6, learning_rate=0.011527648063214935, l2_regularization=0.641198423432638e-5,imbalance_kl=0.0, z_dims=16)
     #     mse_all.append(mse)
     #     print('第{}次测试完成'.format(i))
     # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
     # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
 
     # MIMIC 数据
-    mse_all = []
-    for i in range(50):
-        mse = train_step(hidden_size=8, n_disc=9, lambda_balance=2.39760549104175e-06, learning_rate=0.04296371550948975, l2_regularization=0.0008088033292719706,imbalance_kl=2.5280486584224974e-06, z_dims=8,t_imbalance=1.544148007053039e-05)
-        mse_all.append(mse)
-        print('第{}次测试完成'.format(i))
-        print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
-        print('----------------mse_std:{}----------'.format(np.std(mse_all)))
+    # mse_all = []
+    # for i in range(10):
+    #     mse = train_step(hidden_size=16, n_disc=9, lambda_balance=0.150875333444718e-6, learning_rate=0.010264040860651786, l2_regularization=0.1107279067676901e-5,imbalance_kl=0.0, z_dims=16)
+    #     mse_all.append(mse)
+    #     print('第{}次测试完成'.format(i))
+    # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
+    # print('----------------mse_std:{}----------'.format(np.std(mse_all)))

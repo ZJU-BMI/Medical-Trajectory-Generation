@@ -1,6 +1,6 @@
 import tensorflow as tf
 from tensorflow_core.python.keras.models import Model
-from data import DataSet, read_data, read_gaucoma_data
+from modify.data import DataSet
 from LSTMCell import *
 from bayes_opt import BayesianOptimization
 

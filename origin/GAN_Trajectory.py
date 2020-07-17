@@ -1,12 +1,7 @@
 import tensorflow as tf
 from tensorflow_core.python.keras.models import Model
-from data import DataSet, read_data, read_gaucoma_data
-import numpy as np
-from datetime import datetime
-from tensorflow_core.python.keras import backend as K
-from sklearn.model_selection import train_test_split
-from TimeLSTMCell_2 import *
-from bayes_opt import BayesianOptimization
+from modify.data import DataSet
+from LSTMCell import *
 
 
 # define the discriminator class
@@ -53,15 +48,15 @@ class Generator(Model):
         self.hidden_size = hidden_size
         self.batch_size = batch_size
         self.time_step = time_step
-        self.LSTM_Cell_decode = TimeLSTMCell_2(feature_dims)
+        self.LSTM_Cell_decode = LSTMCell(feature_dims)
         self.dense1 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
         self.dense2 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
         self.dense3 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
 
     def build(self, context_state_shape):
-        shape_weight_1 = tf.TensorShape((1, 1, context_state_shape[0][2]))
-        shape_weight_2 = tf.TensorShape((1, 1, context_state_shape[0][2]))
-        shape_weight_3 = tf.TensorShape((1, 1, context_state_shape[0][2]))
+        shape_weight_1 = tf.TensorShape((1, 1, context_state_shape[2]))
+        shape_weight_2 = tf.TensorShape((1, 1, context_state_shape[2]))
+        shape_weight_3 = tf.TensorShape((1, 1, context_state_shape[2]))
 
         self.attention_weight_1 = self.add_weight(name='attention_weight_1',
                                                   shape=shape_weight_1,
@@ -78,8 +73,7 @@ class Generator(Model):
 
         super(Generator, self).build(context_state_shape)
 
-    def call(self, context_state):  # 这里考虑了时间因素
-        context_state, input_t = context_state
+    def call(self, context_state):  # 这里还没有考虑时间因素
         batch = tf.shape(context_state)[0]
         last_hidden = context_state[:, 2, :]
         last_hidden = tf.reshape(last_hidden, (-1, 1, self.hidden_size))
@@ -94,9 +88,7 @@ class Generator(Model):
         state = self.LSTM_Cell_decode.get_initial_state(batch_size=batch, dtype=float)
         fake_input = tf.zeros(shape=[batch, 0, self.feature_dims])
         for time in range(self.time_step-3):
-            t = input_t[:, time+3, :]
-            t = tf.reshape(t, [-1, 1])
-            output, state = self.LSTM_Cell_decode([decoder_input[:, time, :], t], state)
+            output, state = self.LSTM_Cell_decode(decoder_input[:, time, :], state)
             output_ = tf.reshape(output, [batch, 1, -1])
             fake_input = tf.concat((fake_input, output_), axis=1)
         fake_input = tf.reshape(fake_input, [-1, self.feature_dims])
@@ -126,20 +118,24 @@ class EncodeContext(Model):
 
 
 def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization):
-    # train_set = np.load('train_x_.npy').reshape(-1, 6, 60)
-    # test_set = np.load('test_x.npy').reshape(-1, 6, 60)
-    # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)
+    # train_set = np.load('train_x_.npy').reshape(-1, 6, 60)[:, :, 1:]
+    # test_set = np.load('test_x.npy').reshape(-1, 6, 60)[:, :, 1:]
+    # # test_set = np.load('validate_x_.npy').reshape(-1, 6, 60)[:, :, 1:]
 
-    # train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)
-    # test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)
-    # test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)
+    # train_set = np.load('mimic_train_x_.npy').reshape(-1, 6, 37)[:, :, 1:]
+    # # test_set = np.load('mimic_validate_.npy').reshape(-1, 6, 37)[:, :, 1:]
+    # test_set = np.load('mimic_test_x_.npy').reshape(-1, 6, 37)[:, :, 1:]
 
-    train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)
-    test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)
-    # test_set = np.load('HF_validate_.npy').reshape(-1, 6, 30)
+    train_set = np.load('HF_train_.npy').reshape(-1, 6, 30)[:, :, 1:]
+    test_set = np.load('HF_test_.npy').reshape(-1, 6, 30)[:, :, 1:]
+    # test_set = np.load('HF_validate_.npy').reshape(-1, 6, 30)[:, :, 1:]
+
+    train_set = np.load('generate_train_x_.npy').reshape(-1, 6, 30)
+    # test_set = np.load('generate_validate_x_.npy').reshape(-1, 6, 30)
+    test_set = np.load('generate_test_x_.npy').reshape(-1, 6, 30)
 
     time_step = 6
-    feature_dims = train_set.shape[2]-1
+    feature_dims = train_set.shape[2]
 
     train_set = DataSet(train_set)
     test_set = DataSet(test_set)
@@ -148,11 +144,11 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
     batch_size = 64
     epochs = 1
 
-    # hidden_size = 2 ** (int(hidden_size))
+    # hidden_size = 2**(int(hidden_size))
     # n_disc = int(n_disc)
-    # lambda_balance = 10 ** lambda_balance
-    # learning_rate = 10 ** learning_rate
-    # l2_regularization = 10 ** l2_regularization
+    # lambda_balance = 10**lambda_balance
+    # learning_rate = 10**learning_rate
+    # l2_regularization = 10**l2_regularization
 
     print('----batch_size{}---hidden_size{}---n_disc{}---epochs{}---'
           'lambda_balance{}---learning_rate{}---l2_regularization{}---'
@@ -172,22 +168,15 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
     discriminator_optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate)
     cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 
-    with tf.GradientTape(persistent=True) as gen_tape, tf.GradientTape(persistent=True) as disc_tape:
+    with tf.GradientTape(persistent=True) as gen_tape, tf.GradientTape(persistent=True) as disc_tape, tf.GradientTape() as encode_tape:
         while train_set.epoch_completed < epochs:
             input_x_train = train_set.next_batch(batch_size)
-            input_x_train_feature = tf.cast(input_x_train[:, :, 1:], tf.float32)
-            input_t_train = input_x_train[:, :, 0].reshape(-1, 6, 1)
-
-            input_t_train = tf.cast(input_t_train, tf.float32)
-
-            input_x_test_feature = test_set.dynamic_features
-            input_x_test = tf.cast(input_x_test_feature[:, :, 1:], tf.float32)
-            input_t_test = input_x_test_feature[:, :, 0].reshape(-1, 6, 1)
-
-            input_t_test = tf.cast(input_t_test, tf.float32)
+            input_x_train_feature = tf.cast(input_x_train, tf.float32)
+            input_x_test = test_set.dynamic_features
+            input_x_test = tf.cast(input_x_test, tf.float32)
             for disc in range(n_disc):
                 context_state = encode_context(input_x_train_feature)
-                fake_input = generator([context_state, input_t_train])
+                fake_input = generator(context_state)
                 d_real_pre, d_fake_pre = discriminator(input_x_train_feature, fake_input)
 
                 d_fake_pre_ = tf.reshape(d_fake_pre, [-1, 1])
@@ -205,13 +194,10 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
 
             d_real_pre, d_fake_pre = discriminator(input_x_train_feature, fake_input)
             d_fake_pre_ = tf.reshape(d_fake_pre, [-1, 1])
-
             mae_loss = tf.reduce_mean(tf.keras.losses.mse(input_x_train_feature[:, 3:, :], fake_input))
-            gen_loss = mae_loss + cross_entropy(tf.ones_like(d_fake_pre_), d_fake_pre_) * lambda_balance
-
-            variables = [var for var in generator.trainable_variables]
-            for var in encode_context.trainable_variables:
-                variables.append(var)
+            mse = tf.reduce_mean(tf.keras.losses.mse(input_x_train_feature[:, 3:, :], fake_input), axis=0)
+            print(mse)
+            gen_loss = mae_loss + cross_entropy(tf.ones_like(d_fake_pre_), d_fake_pre_)*lambda_balance
 
             for weight in generator.trainable_variables:
                 gen_loss += tf.keras.regularizers.l2(l2_regularization)(weight)
@@ -219,14 +205,15 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
             for weight in encode_context.trainable_variables:
                 gen_loss += tf.keras.regularizers.l2(l2_regularization)(weight)
 
+            variables = [var for var in generator.trainable_variables]
+            for var in encode_context.trainable_variables:
+                variables.append(var)
+
             gradient_generator = gen_tape.gradient(gen_loss, variables)
             generator_optimizer.apply_gradients(zip(gradient_generator, variables))
 
-            # print('----------gan_loss--------------', gen_loss)
-            # print("-----------mse_loss------------", mae_loss)
-
         context_state_test = encode_context(input_x_test)
-        fake_input_test = generator([context_state_test, input_t_test])
+        fake_input_test = generator(context_state_test)
         d_real_pre_test, d_fake_pre_test = discriminator(input_x_test, fake_input_test)
         d_real_pre_test_loss = cross_entropy(tf.ones_like(d_real_pre_test), d_real_pre_test)
         d_fake_pre_test_loss = cross_entropy(tf.zeros_like(d_fake_pre_test), d_fake_pre_test)
@@ -234,46 +221,54 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
         gen_loss_ = cross_entropy(tf.ones_like(d_fake_pre_test), d_fake_pre_test)
         input_r = input_x_test[:, 3:, :]
         input_f = fake_input_test
-        mse_loss_ = tf.reduce_mean(tf.keras.losses.MSE(input_r, input_f))
+        mse_loss_ = tf.reduce_mean(tf.keras.losses.mse(input_r, input_f))
+        mse = tf.reduce_mean(tf.keras.losses.mse(input_x_train_feature[:, 3:, :], fake_input), axis=0)
+        print(mse)
         print("d_loss:{}------gen_loss:{}-------mse_loss:{}---------".format(d_loss_, gen_loss_, mse_loss_))
         tf.compat.v1.reset_default_graph()
         return -1*mse_loss_
 
 
 if __name__ == '__main__':
-    # GAN_time_LSTM_BO = BayesianOptimization(
+    # GAN_LSTM_BO = BayesianOptimization(
     #     train_step, {
-    #         'hidden_size': (4, 8),
-    #         'n_disc': (1, 20),
+    #         'hidden_size': (5, 7),
+    #         'n_disc': (10, 20),
     #         'lambda_balance': (-6, 0),
-    #         'learning_rate': (-5, 0),
-    #         'l2_regularization': (-5, 0),
+    #         'learning_rate': (-5, -1),
+    #         'l2_regularization': (-5, -1),
     #     }
     # )
-    # GAN_time_LSTM_BO.maximize(n_iter=30)
-    # print(GAN_time_LSTM_BO.max)
+    # GAN_LSTM_BO.maximize()
+    # print(GAN_LSTM_BO.max)
     # mse_all = []
-    # for i in range(10):
-    #     mse = train_step(hidden_size=64, n_disc=13, lambda_balance=0.000001, learning_rate=0.0313, l2_regularization=0.00001)
+    # for i in range(50):
+    #     mse = train_step(hidden_size=64, n_disc=15, lambda_balance=0.808, learning_rate=0.02887, l2_regularization=0.0012)
+    #     mse_all.append(mse)
+    #     print('第{}次测试完成'.format(i))
+    # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
+
+    # mse_all = []
+    # for i in range(50):
+    #     mse = train_step(hidden_size=64, n_disc=12, lambda_balance=0.001607, learning_rate=0.02547, l2_regularization=0.0010521)
     #     mse_all.append(mse)
     #     print('第{}次测试完成'.format(i))
     # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
     # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
 
-    #  青光眼
     # mse_all = []
-    # for i in range(10):
-    #     mse = train_step(hidden_size=16, n_disc=8, lambda_balance=0.0000300288, learning_rate=0.03783236, l2_regularization=0.003205565)
+    # for i in range(50):
+    #     mse = train_step(hidden_size=32, n_disc=15, lambda_balance=0.000001, learning_rate=0.1, l2_regularization=0.0004803126481777589)
     #     mse_all.append(mse)
     #     print('第{}次测试完成'.format(i))
     # print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
     # print('----------------mse_std:{}----------'.format(np.std(mse_all)))
 
-    # 心衰数据
     mse_all = []
-    for i in range(10):
-        mse = train_step(hidden_size=128, n_disc=17, lambda_balance=0.0005805789742481522, learning_rate=0.02179564802117027, l2_regularization=0.010582695884704991)
+    for i in range(50):
+        mse = train_step(hidden_size=32, n_disc=19, lambda_balance=0.5800768549089896, learning_rate=0.09967514396270517, l2_regularization=0.016098856440393123)
         mse_all.append(mse)
         print('第{}次测试完成'.format(i))
     print('----------------mse_average:{}----------'.format(np.mean(mse_all)))
     print('----------------mse_std:{}----------'.format(np.std(mse_all)))
+

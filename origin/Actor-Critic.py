@@ -1,11 +1,7 @@
-import tensorflow as tf
-import numpy as np
-from tensorflow_core.python.keras.models import Model
 # import tensorflow_probability as tfp
-from data import DataSet
+from modify.data import DataSet
 from TimeLSTMCell_3 import *
 import scipy.stats as stats
-from bayes_opt import BayesianOptimization
 
 
 # Encode the state into hidden state

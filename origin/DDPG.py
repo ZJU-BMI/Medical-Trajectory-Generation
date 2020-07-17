@@ -1,8 +1,6 @@
 import tensorflow as tf
 import numpy as np
-import time
-import scipy.stats as stats
-from data import DataSet
+from modify.data import DataSet
 
 
 # Encode the state into hidden state

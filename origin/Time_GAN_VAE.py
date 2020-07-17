@@ -1,12 +1,8 @@
 import tensorflow as tf
 from tensorflow_core.python.keras.models import Model
-from data import DataSet, read_data, read_gaucoma_data
-import numpy as np
-from datetime import datetime
-from tensorflow_core.python.keras import backend as K
-from sklearn.model_selection import train_test_split
+from modify.data import DataSet
 from TimeLSTMCell_1 import *
-from bayes_opt import BayesianOptimization
+
 tf.keras.backend.floatx()
 from scipy import stats
 

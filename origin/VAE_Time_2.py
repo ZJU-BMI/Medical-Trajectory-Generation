@@ -1,8 +1,6 @@
-import tensorflow as tf
 from tensorflow_core.python.keras.models import Model
-from data import DataSet
+from modify.data import DataSet
 from TimeLSTMCell_2 import *
-from bayes_opt import BayesianOptimization
 from scipy import stats
 
 

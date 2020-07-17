@@ -1,9 +1,11 @@
 import tensorflow as tf
 from tensorflow_core.python.keras.models import Model
-from data import DataSet
+from modify.data import DataSet
 from LSTMCell import *
 from bayes_opt import BayesianOptimization
 import scipy.stats as stats
+import sys
+import os
 
 import warnings
 warnings.filterwarnings(action='once')
@@ -111,16 +113,20 @@ class Post(Model):
 def kl_loss(z_mean_post, log_var_post, z_mean_prior, log_var_prior):
     std_post = tf.math.sqrt(tf.exp(log_var_post))
     std_prior = tf.math.sqrt(tf.exp(log_var_prior))
-    kl_loss_element = (2 * tf.math.log(std_prior) - 2 * tf.math.log(std_post) +
+    kl_loss_element = (2 * tf.math.log(tf.maximum(std_prior, 1e-9)) - 2 * tf.math.log(tf.maximum(std_post, 1e-9)) +
                        (tf.math.pow(std_post, 2) +
-                       tf.math.pow((z_mean_post - z_mean_prior), 2)) / (tf.math.pow(z_mean_prior, 2))-1)
+                       tf.math.pow((z_mean_post - z_mean_prior), 2)) / tf.maximum(tf.math.pow(z_mean_prior, 2), 1e-9)-1)
     return 0.5 * kl_loss_element
 
 
 def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, reconstruction_imbalance, generated_mse_imbalance):
-    train_set = np.load("../../Trajectory_generate/generate_train_x_.npy").reshape(-1, 6, 30)[:, :, 1:]
-    # test_set = np.load("../../Trajectory_generate/HF_validate_.npy").reshape(-1, 6, 30)[:, :, 1:]
-    test_set = np.load("../../Trajectory_generate/generate_validate_x_.npy").reshape(-1, 6, 30)[:, :, 1:]
+    # train_set = np.load("../../Trajectory_generate/dataset_file/train_x_.npy").reshape(-1, 6, 60)[:, :, 1:]
+    # # test_set = np.load("../../Trajectory_generate/test_x.npy").reshape(-1, 6, 30)[:, :, 1:]
+    # test_set = np.load("../../Trajectory_generate/dataset_file/validate_x_.npy").reshape(-1, 6, 60)[:, :, 1:]
+
+    train_set = np.load("../../Trajectory_generate/dataset_file/train_x_.npy").reshape(-1, 6, 60)[:, :, 1:]
+    # test_set = np.load("../../Trajectory_generate/dataset_file/test_x.npy").reshape(-1, 6, 60)[:, :, 1:]
+    test_set = np.load("../../Trajectory_generate/dataset_file/validate_x_.npy").reshape(-1, 6, 60)[:, :, 1:]
 
     previous_visit = 3
     predicted_visit = 3
@@ -213,9 +219,10 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
 
             std_post = tf.math.sqrt(tf.exp(z_log_var_post_all))
             std_prior = tf.math.sqrt(tf.exp(z_mean_prior_all))
-            kl_loss_element = 0.5 * (2 * tf.math.log(std_prior) - 2 * tf.math.log(std_post) +
-                               (tf.math.pow(std_post, 2) +
-                                tf.math.pow((z_mean_post_all - z_mean_prior_all), 2)) / (tf.math.pow(z_mean_prior_all, 2)) - 1)
+            kl_loss_element = 0.5 * (2 * tf.math.log(tf.maximum(std_prior, 1e-9)) - 2 * tf.math.log(tf.maximum(std_post,
+                                                                                                               1e-9)) +
+                                     (tf.math.pow(std_post, 2) + tf.math.pow((z_mean_post_all - z_mean_prior_all), 2)) /
+                                     tf.maximum(tf.math.pow(z_mean_prior_all, 2), 1e-9) - 1)
             kl_loss_all = tf.reduce_mean(kl_loss_element)
 
             loss += mse_reconstruction * reconstruction_imbalance + kl_loss_all * kl_imbalance + mse_generate * generated_mse_imbalance
@@ -313,10 +320,34 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
                                                                                       np.mean(r_value_all),
                                                                                       count))
     tf.compat.v1.reset_default_graph()
-    return -1 * mse_generate_test, np.mean(r_value_all)
+    # return -1 * mse_generate_test, np.mean(r_value_all)
+    return -1*mse_generate_test
+
+
+def test_test(name):
+    class Logger(object):
+        def __init__(self, filename="Default.log"):
+            self.terminal = sys.stdout
+            self.log = open(filename, "a", encoding='utf-8')
+
+        def write(self, message):
+            self.terminal.write(message)
+            self.log.write(message)
+
+        def flush(self):
+            pass
+
+    path = os.path.abspath(os.path.dirname(__file__))
+    type = sys.getfilesystemencoding()
+    sys.stdout = Logger(name)
+
+    print(path)
+    print(os.path.dirname(__file__))
+    print('------------------')
 
 
 if __name__ == '__main__':
+    test_test('VAE_青光眼——train_3_3.txt')
     Encode_Decode_Time_BO = BayesianOptimization(
         train, {
             'hidden_size': (5, 8),
