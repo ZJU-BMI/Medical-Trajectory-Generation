@@ -411,6 +411,7 @@ def train_step(hidden_size, n_disc, lambda_balance, learning_rate, l2_regulariza
                 prior_d = z_all[m][1]
                 kl_loss = - KL(posterior_d, prior_d)
             kl_loss_all = tf.reduce_mean(kl_loss)
+            print("kl_loss{}-------".format(kl_loss_all))
 
             gen_loss = mae_loss + cross_entropy(tf.ones_like(d_fake_pre_), d_fake_pre_)*lambda_balance + kl_loss_all * imbalance_kl + time_loss * t_imbalance
 

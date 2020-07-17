@@ -8,6 +8,8 @@ import os
 import sys
 from sklearn.preprocessing import MinMaxScaler
 
+from sklearn.metrics import mean_squared_error
+
 
 class ShareInformationEncode(tf.keras.layers.Layer):
     def __init__(self, encode_dims):
@@ -57,11 +59,11 @@ class VAE(Model):
         self.dense2 = tf.keras.layers.Dense(units=z_dims, activation=tf.nn.relu)
         self.dense3 = tf.keras.layers.Dense(units=z_dims, activation=tf.nn.relu)
         # obtain z_mean and z_log_var
-        self.dense4 = tf.keras.layers.Dense(units=z_dims, activation=tf.nn.relu)
-        self.dense5 = tf.keras.layers.Dense(units=z_dims, activation=tf.nn.relu)
+        self.dense4 = tf.keras.layers.Dense(units=z_dims, activation=None)
+        self.dense5 = tf.keras.layers.Dense(units=z_dims, activation=None)
         # reconstruct input from sample z
         self.share_encode = tf.keras.layers.LSTMCell(encode_dims)
-        self.share_decode = tf.keras.layers.LSTMCell(feature_dims)
+        self.share_decode = tf.keras.layers.LSTMCell(encode_dims)
         # obtain next visit
         self.dense6 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
         self.dense7 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
@@ -82,7 +84,7 @@ class VAE(Model):
             sequence_time = real_sequence[:, self.previous_visit + time, :]
             h_i_ = h_i  # store the last visit hidden representation
             output, state_encode = self.share_encode(sequence_time, state_encode)  # h_(i+1)
-            hidden_concat = tf.concat((h_i, output), axis=1)  # [batch, encode_dims*2] concat hidden state
+            hidden_concat = tf.concat((h_i, output, sequence_time), axis=1)   # [batch, encode_dims*2] concat hidden state
             h_i = output  # update
             hidden_concat_1 = self.dense1(hidden_concat)
             hidden_concat_2 = self.dense2(hidden_concat_1)
@@ -90,16 +92,21 @@ class VAE(Model):
             mean_z = self.dense4(hidden_concat_3)
             log_var_z = self.dense5(hidden_concat_3)
             log_var_z = tf.nn.softplus(log_var_z) + 1e-6
-            z = self.reparameterize(mean_z, log_var_z)  # z_(i+1)
-            input_decode = tf.concat((z, h_i_), axis=1)  # z_(i+1) and h_i
+            z = self.reparameterize(mean_z, log_var_z, self.z_dims)  # z_(i+1)
+            input_decode = tf.concat((z, h_i_, sequence_time), axis=1)  # z_(i+1) and h_i
             batch = tf.shape(input_t)[0]
-            current_time_index = time + self.predicted_visit
+            current_time_index = time + self.previous_visit
+            trigger_parameter_beta = tf.tile(self.trigger_parameter_beta, [batch, 1])
+            trigger_parameter_alpha = tf.tile(self.trigger_parameter_alpha, [batch, 1])
+            base_intensity = tf.tile(self.base_intensity, [batch, 1])
             condition_value = self.calculate_hawkes_process(batch=batch, input_t=input_t,
                                                             current_time_index=current_time_index,
-                                                            trigger_parameter_alpha=self.trigger_parameter_alpha,
-                                                            trigger_parameter_beta=self.trigger_parameter_beta,
-                                                            base_intensity=self.base_intensity)
-            state_decode = [state_decode[0] * condition_value, state_decode[1] * condition_value]
+                                                            trigger_parameter_alpha=trigger_parameter_alpha,
+                                                            trigger_parameter_beta=trigger_parameter_beta,
+                                                            base_intensity=base_intensity)
+            condition_value = tf.tile(tf.reshape(condition_value, [batch, 1]), [1, self.encode_dims])
+
+            state_decode = [state_decode[0], state_decode[1] * condition_value]
             # recurrence and generate next visit hidden representation
             generated_next_visit_hidden, state_decode = self.share_decode(input_decode, state_decode)
 
@@ -116,10 +123,16 @@ class VAE(Model):
 
         return z_all, z_mean_all, z_log_var_all, input_reconstruction
 
-    def reparameterize(self, mu, log_var):
-        std = tf.exp(0.5 * log_var)
-        eps = tf.compat.v1.random_normal(shape=tf.shape(std))
-        return mu + eps * std
+    def reparameterize(self, mu, log_var, feature_dims):
+        batch = tf.shape(mu)[0]
+        sample_all = tf.zeros(shape=(batch, 0))
+        for feature in range(feature_dims):
+            sample = tf.compat.v1.random_normal(shape=(batch, 1))
+            sample_all = tf.concat((sample_all, sample), axis=1)
+        z = mu + tf.multiply(sample_all, tf.math.sqrt(tf.exp(log_var)))
+        # std = tf.exp(0.5 * log_var)
+        # eps = tf.compat.v1.random_normal(shape=tf.shape(std))
+        return z
 
     def build(self, input_shape):
         shape_hawkes = tf.TensorShape((1, 1))
@@ -316,13 +329,13 @@ class PriorAndGenerationNetwork(Model):
         self.dense3 = tf.keras.layers.Dense(units=z_dims, activation=tf.nn.relu)
 
         # obtain z_mean and z_log_var
-        self.dense4 = tf.keras.layers.Dense(units=z_dims, activation=tf.nn.relu)
-        self.dense5 = tf.keras.layers.Dense(units=z_dims, activation=tf.nn.relu)
+        self.dense4 = tf.keras.layers.Dense(units=z_dims, activation=None)
+        self.dense5 = tf.keras.layers.Dense(units=z_dims, activation=None)
         # generate x_(i+1)
-        self.share_decode = tf.keras.layers.LSTMCell(feature_dims)
+        self.share_decode = tf.keras.layers.LSTMCell(encode_dims)
         # obtain the next visit
-        self.dense6 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
-        self.dense7 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
+        self.dense6 = tf.keras.layers.Dense(units=feature_dims, activation=None)
+        self.dense7 = tf.keras.layers.Dense(units=feature_dims, activation=None)
         self.dense8 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
 
     def build(self, input_shape):
@@ -401,45 +414,55 @@ class PriorAndGenerationNetwork(Model):
         z_log_var = tf.nn.softplus(z_log_var) + 1e-6
         return z_mean, z_log_var
 
-    def reparameterize(self, mu, log_var):
-        std = tf.exp(0.5 * log_var)
-        eps = tf.compat.v1.random_normal(shape=tf.shape(std))
-        return mu + eps * std
+    def reparameterize(self, mu, log_var, feature_dims):
+        batch = tf.shape(mu)[0]
+        sample_all = tf.zeros(shape=(batch, 0))
+        for feature in range(feature_dims):
+            sample = tf.compat.v1.random_normal(shape=(batch, 1))
+            sample_all = tf.concat((sample_all, sample), axis=1)
+        z = mu + tf.multiply(sample_all, tf.math.sqrt(tf.exp(log_var)))
+        # std = tf.exp(0.5 * log_var)
+        # eps = tf.compat.v1.random_normal(shape=tf.shape(std))
+        return z
 
     def call(self, inputs_prior):
 
         h_i, h_i_information, h_i_recurrence, h_i_state_recurrence, real_sequence_last_time, real_sequence_current_time, current_time_index_shape, input_t = inputs_prior
 
-        c = h_i_state_recurrence[:, :self.feature_dims]
-        h = h_i_state_recurrence[:, self.feature_dims:]
+        c = h_i_state_recurrence[:, :self.encode_dims]
+        h = h_i_state_recurrence[:, self.encode_dims:]
         state_encode = [c, h]
 
         z_mean, z_log_var = self.prior_work(h_i)
-        z = self.reparameterize(z_mean, z_log_var)  # z_i
-        input_decode = tf.concat((z, h_i), axis=1)  # concat z_(i+1) and h_i
+        z = self.reparameterize(z_mean, z_log_var, self.z_dims)  # z_i
+        input_decode = tf.concat((z, h_i, real_sequence_last_time), axis=1)  # concat z_(i+1) and h_i
 
         batch = tf.shape(input_t)[0]
         current_time_index = tf.shape(current_time_index_shape)[0]
 
+        trigger_parameter_beta = tf.tile(self.trigger_parameter_beta, [batch, 1])
+        trigger_parameter_alpha = tf.tile(self.trigger_parameter_alpha, [batch, 1])
+        base_intensity = tf.tile(self.base_intensity, [batch, 1])
         condition_value = self.calculate_hawkes_process(batch=batch, input_t=input_t,
                                                         current_time_index=current_time_index,
-                                                        trigger_parameter_alpha=self.trigger_parameter_alpha,
-                                                        trigger_parameter_beta=self.trigger_parameter_beta,
-                                                        base_intensity=self.base_intensity)
+                                                        trigger_parameter_alpha=trigger_parameter_alpha,
+                                                        trigger_parameter_beta=trigger_parameter_beta,
+                                                        base_intensity=base_intensity)
+        condition_value = tf.tile(tf.reshape(condition_value, [batch, 1]), [1, self.encode_dims])
 
         likelihood = self.calculate_likelihood(batch=batch, input_t=input_t, current_time_index=current_time_index,
-                                               trigger_parameter_alpha=self.trigger_parameter_alpha,
-                                               trigger_parameter_beta=self.trigger_parameter_beta,
-                                               base_intensity=self.base_intensity)
+                                               trigger_parameter_alpha=trigger_parameter_alpha,
+                                               trigger_parameter_beta=trigger_parameter_beta,
+                                               base_intensity=base_intensity)
 
-        state_decode = [state_encode[0] * condition_value, state_encode[1]*condition_value]
+        state_decode = [state_encode[0], state_encode[1]*condition_value]
 
         output, output_state = self.share_decode(input_decode, state_decode)
 
         generated_next_visit = self.dense6(output)
         generated_next_visit = self.dense7(generated_next_visit)
         generated_next_visit = self.dense8(generated_next_visit)
-        generated_next_visit = tf.nn.sigmoid(generated_next_visit)
+        # generated_next_visit = tf.nn.sigmoid(generated_next_visit)
 
         output_state = tf.concat((output_state[0], output_state[1]), axis=1)
         return z, z_mean, z_log_var, generated_next_visit, likelihood, output, output_state
@@ -456,7 +479,7 @@ class Discriminator(Model):
         self.predicted_visit = predicted_visit
 
         self.dense1 = tf.keras.layers.Flatten()
-        self.dense2 = tf.keras.layers.Dense(units=1, activation=tf.nn.sigmoid)
+        self.dense2 = tf.keras.layers.Dense(units=1, activation=None)
         self.LSTM_Cell = tf.keras.layers.LSTMCell(hidden_size)
 
     def call(self, real_input, fake_input):
@@ -558,7 +581,15 @@ def train(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization,
     t_imbalance = 10 ** t_imbalance
 
     batch_size = 32
-    epochs = 1
+    epochs = 30
+
+    logged = set()
+
+    max_loss = 0.01
+    max_pace = 0.0001
+
+    mse_loss = 0
+    count = 0
 
     print('previous_visit---{}----predicted—_visit{}'.format(previous_visit, predicted_visit))
     print('----batch_size{}---hidden_size{}---n_disc{}---epochs{}---'
@@ -585,7 +616,7 @@ def train(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization,
     cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 
     with tf.GradientTape(persistent=True) as gen_tape, tf.GradientTape(persistent=True) as disc_tape:
-        while train_set.epoch_completed < 3:
+        while train_set.epoch_completed < epochs:
             input_train = train_set.next_batch(batch_size)
             input_x_train = input_train[:, :, 1:]
             input_t_train = input_train[:, :, 0]
@@ -594,7 +625,7 @@ def train(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization,
                 # obtain the last visit representation
                 # encode_history, encode_history_state = encode_context(input_x_train)
                 encode_history_state = tf.zeros(shape=[batch, 2 * hidden_size])
-                for t in range(predicted_visit):
+                for t in range(previous_visit):
                     real_sequence_current_time = input_x_train[:, t, :]
                     encode_history, encode_history_state = encode_share([real_sequence_current_time, encode_history_state])
                 # h_i_information = [encode_history, encode_history_state]
@@ -612,8 +643,8 @@ def train(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization,
                     real_sequence_current_time = input_x_train[:, time+previous_visit, :]
 
                     if time == 0:
-                        encode_history_state_recurrence = tf.zeros(shape=[batch, 2*feature_dims])
-                        encode_history_recurrence = tf.zeros(shape=[batch, feature_dims])
+                        encode_history_state_recurrence = tf.zeros(shape=[batch, 2*hidden_size])
+                        encode_history_recurrence = tf.zeros(shape=[batch, hidden_size])
                     current_time_index = time+previous_visit
                     # real value cannot be derived, change it with shape
                     current_time_index_shape = tf.ones(shape=(current_time_index, 1))
@@ -639,9 +670,9 @@ def train(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization,
                     likelihood_trajectory = tf.concat((likelihood_trajectory, likelihood_next_visit), axis=1)
                     z_all_prior = tf.concat((z_all_prior, z_prior), axis=1)
 
-                d_real_pre, d_fake_pre = discriminator(input_x_train, generated_trajectory)
-                d_fake_pre_ = tf.reshape(d_fake_pre, [-1, 1])
-                d_real_pre_ = tf.reshape(d_real_pre, [-1, 1])
+                d_real_pre_, d_fake_pre_ = discriminator(input_x_train, generated_trajectory)
+                # d_fake_pre_ = tf.reshape(d_fake_pre, [-1, 1])
+                # d_real_pre_ = tf.reshape(d_real_pre, [-1, 1])
                 d_real_pre_loss = cross_entropy(tf.ones_like(d_real_pre_), d_real_pre_)
                 d_fake_pre_loss = cross_entropy(tf.zeros_like(d_fake_pre_), d_fake_pre_)
 
@@ -649,17 +680,28 @@ def train(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization,
                 for weight in discriminator.trainable_variables:
                     d_loss += tf.keras.regularizers.l2(l2_regularization)(weight)
 
+                print('d_loss{}----'.format(d_loss))
+
                 gradient_disc = disc_tape.gradient(d_loss, discriminator.trainable_variables)
                 discriminator_optimizer.apply_gradients(zip(gradient_disc, discriminator.trainable_variables))
 
-            d_real_pre, d_fake_pre = discriminator(input_x_train, generated_trajectory)
-            d_fake_pre_ = tf.reshape(d_fake_pre, [-1, 1])
+            d_real_pre_, d_fake_pre_ = discriminator(input_x_train, generated_trajectory)
+
+            # d_fake_pre_ = tf.reshape(d_fake_pre, [-1, 1])
             mse_loss = tf.reduce_mean(
                 tf.keras.losses.mse(input_x_train[:, previous_visit:previous_visit + predicted_visit, :],
                                     input_reconstruction))
 
             mse_loss_2 = tf.reduce_mean(tf.keras.losses.mse(input_x_train[:, previous_visit:previous_visit+predicted_visit, :],
                                         generated_trajectory))
+
+            r_value_all_ = []
+
+            for m in range(predicted_visit):
+                real_y = tf.reshape(input_x_train[:, previous_visit+m, :], [-1, 1])
+                fake_y = tf.reshape(generated_trajectory[:, m, :], [-1, 1])
+                r_value_all_.append(1-mean_squared_error(fake_y, real_y)/np.var(real_y))
+            print(np.mean(r_value_all_))
 
             time_loss = -tf.reduce_mean(tf.math.log(tf.clip_by_value(likelihood_trajectory, 1e-8, 1.0)))
             kl_loss = 0
@@ -673,19 +715,22 @@ def train(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization,
                                (tf.math.pow(post_log_var, 2) + tf.math.pow((post_mean - prior_mean), 2)) / tf.math.pow(prior_log_var, 2) - 1)
                 kl_loss += tf.reduce_sum(kld_element)
 
-            kl_loss = kl_loss
+            kl_loss = kl_loss/previous_visit
+
+            # kl_loss_all = []
             # KL = tf.keras.losses.KLDivergence()
             # for m in range(len(z_all_prior)):
             #     posterior_d = z_post[m]
             #     prior_d = z_all_prior[m]
-            #     kl_loss = KL(posterior_d, prior_d)
-            # kl_loss = tf.reduce_mean(kl_loss)
+            #     kl_loss = - KL(posterior_d, prior_d)
+            #     kl_loss_all.append(kl_loss)
+            # kl_loss = tf.reduce_mean(kl_loss_all)
             gen_loss_1 = cross_entropy(tf.ones_like(d_fake_pre_), d_fake_pre_)
 
-            print('reconstruction_loss----{}-----mse_loss{}----time_loss{}----gen_loss_1{}------kl_loss{}------'.format(mse_loss, mse_loss_2, time_loss, gen_loss_1, kl_loss))
+            print('训练集：reconstruction_loss----{}-----mse_loss{}----time_loss{}----gen_loss_{}------kl_loss{}------'.format(mse_loss, mse_loss_2, time_loss, gen_loss_1, kl_loss))
 
-            # gen_loss = mse_loss + mse_loss_2 + t_imbalance * time_loss + gen_loss_1*lambda_balance + kl_loss
-            gen_loss = mse_loss_2
+            gen_loss = mse_loss
+            # gen_loss = mse_loss_2
 
             variables = [var for var in encode_context.trainable_variables]
             for weight in encode_context.trainable_variables:
@@ -696,7 +741,7 @@ def train(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization,
                 gen_loss += tf.keras.regularizers.l2(l2_regularization)(weight)
                 variables.append(weight)
 
-            for weight in  prior_network.trainable_variables:
+            for weight in prior_network.trainable_variables:
                 gen_loss += tf.keras.regularizers.l2(l2_regularization)(weight)
                 variables.append(weight)
 
@@ -707,6 +752,17 @@ def train(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization,
             gradient_generator = gen_tape.gradient(gen_loss, variables)
             generator_optimizer.apply_gradients(zip(gradient_generator, variables))
 
+            r_value_all = []
+            p_value_all = []
+            for r in range(predicted_visit):
+                x_ = tf.reshape(input_x_train[:, previous_visit + r, :], (-1,))
+                y_ = tf.reshape(generated_trajectory[:, r, :], (-1,))
+                r_value_ = stats.pearsonr(x_, y_)
+                r_value_all.append(r_value_[0])
+                p_value_all.append(r_value_[1])
+            print('-----------r_value{}----------'.format(np.mean(r_value_all)))
+            print('------------p_value{}-----------'.format(np.mean(p_value_all)))
+
             print('开始测试！')
             input_x_test_all = tf.zeros(shape=(0, 6, feature_dims))
             generated_x_test_all = tf.zeros(shape=(0, predicted_visit, feature_dims))
@@ -715,16 +771,23 @@ def train(hidden_size, n_disc, lambda_balance, learning_rate, l2_regularization,
                 batch_test = input_test.shape[0]
                 input_x_test = input_test[:, :, 1:]
                 input_t_test = input_test[:, :, 0]
-                h_i_test, h_i_information_test = encode_context(input_x_test)
+
+                encode_history_state = tf.zeros(shape=[batch_test, 2 * hidden_size])
+                for t in range(predicted_visit):
+                    real_sequence_current_time = input_x_test[:, t, :]
+                    encode_history, encode_history_state = encode_share([real_sequence_current_time, encode_history_state])
+
+                h_i_test = encode_history
+                h_i_information_test = encode_history_state
+
                 generated_trajectory_test = tf.zeros(shape=[batch_test, 0, feature_dims])
                 for time in range(predicted_visit):
                     sequence_last_time_test = input_x_test[:, time+previous_visit-1, :]
                     sequence_current_time_test = input_x_test[:, time+previous_visit, :]
 
                     if time == 0:
-                        encode_history_state_test_recurrence = tf.zeros(shape=[batch_test, 2*feature_dims])
-                        encode_history_test_recurrence = tf.zeros(shape=(batch_test, feature_dims))
-                        h_i_information_test = tf.concat((h_i_information_test[0], h_i_information_test[1]), axis=1)
+                        encode_history_state_test_recurrence = tf.zeros(shape=[batch_test, 2*hidden_size])
+                        encode_history_test_recurrence = tf.zeros(shape=(batch_test, hidden_size))
 
                     current_time_index_test = time + previous_visit
                     current_time_index_shape = tf.ones(shape=(current_time_index_test, 1))
@@ -789,9 +852,9 @@ if __name__ == '__main__':
     test_test('7_15_1 修改proposed model.txt')
     GAN_LSTM_BO = BayesianOptimization(
         train, {
-            'hidden_size': (3, 5),
-            'z_dims': (3, 5),
-            'n_disc': (1, 20),
+            'hidden_size': (3, 6),
+            'z_dims': (3, 6),
+            'n_disc': (1, 3),
             'lambda_balance': (-6, 0),
             'imbalance_kl': (-6, 0),
             'learning_rate': (-5, -1),
@@ -801,8 +864,6 @@ if __name__ == '__main__':
     )
     GAN_LSTM_BO.maximize()
     print(GAN_LSTM_BO.max)
-
-
     # mse_all = []
     # for i in range(50):
     #     mse = train(hidden_size=16, n_disc=5, lambda_balance=7.334671684939495e-05,
