@@ -1,14 +1,19 @@
 import tensorflow as tf
 from tensorflow_core.python.keras.models import Model
-from modify.data import DataSet
-from LSTMCell import *
+from data import DataSet
 from bayes_opt import BayesianOptimization
 import scipy.stats as stats
+import numpy as np
 import sys
 import os
 
 import warnings
 warnings.filterwarnings(action='once')
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+gpus = tf.config.experimental.list_physical_devices(device_type='GPU')
+for gpu in gpus:
+    tf.config.experimental.set_memory_growth(gpu, True)
 
 
 # 单步执行编码的过程
@@ -115,18 +120,18 @@ def kl_loss(z_mean_post, log_var_post, z_mean_prior, log_var_prior):
     std_prior = tf.math.sqrt(tf.exp(log_var_prior))
     kl_loss_element = (2 * tf.math.log(tf.maximum(std_prior, 1e-9)) - 2 * tf.math.log(tf.maximum(std_post, 1e-9)) +
                        (tf.math.pow(std_post, 2) +
-                       tf.math.pow((z_mean_post - z_mean_prior), 2)) / tf.maximum(tf.math.pow(z_mean_prior, 2), 1e-9)-1)
+                       tf.math.pow((z_mean_post - z_mean_prior), 2)) / tf.maximum(tf.math.pow(std_prior, 2), 1e-9)-1)
     return 0.5 * kl_loss_element
 
 
 def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, reconstruction_imbalance, generated_mse_imbalance):
-    # train_set = np.load("../../Trajectory_generate/dataset_file/train_x_.npy").reshape(-1, 6, 60)[:, :, 1:]
-    # # test_set = np.load("../../Trajectory_generate/test_x.npy").reshape(-1, 6, 30)[:, :, 1:]
+    train_set = np.load("../../Trajectory_generate/dataset_file/train_x_.npy").reshape(-1, 6, 60)[:, :, 1:]
+    test_set = np.load("../../Trajectory_generate/dataset_file/test_x.npy").reshape(-1, 6, 60)[:, :, 1:]
     # test_set = np.load("../../Trajectory_generate/dataset_file/validate_x_.npy").reshape(-1, 6, 60)[:, :, 1:]
 
-    train_set = np.load("../../Trajectory_generate/dataset_file/train_x_.npy").reshape(-1, 6, 60)[:, :, 1:]
+    # train_set = np.load("../../Trajectory_generate/dataset_file/train_x_.npy").reshape(-1, 6, 60)[:, :, 1:]
     # test_set = np.load("../../Trajectory_generate/dataset_file/test_x.npy").reshape(-1, 6, 60)[:, :, 1:]
-    test_set = np.load("../../Trajectory_generate/dataset_file/validate_x_.npy").reshape(-1, 6, 60)[:, :, 1:]
+    # test_set = np.load("../../Trajectory_generate/dataset_file/validate_x_.npy").reshape(-1, 6, 60)[:, :, 1:]
 
     previous_visit = 3
     predicted_visit = 3
@@ -138,13 +143,13 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
     batch_size = 64
     epochs = 50
     #
-    hidden_size = 2 ** (int(hidden_size))
-    z_dims = 2 ** (int(z_dims))
-    learning_rate = 10 ** learning_rate
-    l2_regularization = 10 ** l2_regularization
-    kl_imbalance = 10 ** kl_imbalance
-    reconstruction_imbalance = 10 ** reconstruction_imbalance
-    generated_mse_imbalance = 10 ** generated_mse_imbalance
+    # hidden_size = 2 ** (int(hidden_size))
+    # z_dims = 2 ** (int(z_dims))
+    # learning_rate = 10 ** learning_rate
+    # l2_regularization = 10 ** l2_regularization
+    # kl_imbalance = 10 ** kl_imbalance
+    # reconstruction_imbalance = 10 ** reconstruction_imbalance
+    # generated_mse_imbalance = 10 ** generated_mse_imbalance
 
     print('hidden_size{}----z_dims{}------learning_rate{}----l2_regularization{}---'
           'kl_imbalance{}----reconstruction_imbalance '
@@ -184,7 +189,7 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
                 sequence_last_time = input_x_train[:, predicted_visit_+previous_visit-1, :]
                 sequence_time_current_time = input_x_train[:, predicted_visit_+previous_visit, :]
 
-                for previous_visit_ in range(previous_visit):
+                for previous_visit_ in range(previous_visit+predicted_visit_):
                     sequence_time = input_x_train[:, previous_visit_, :]
                     if previous_visit_ == 0:
                         encode_c = tf.Variable(tf.zeros(shape=[batch, hidden_size]))
@@ -222,7 +227,7 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
             kl_loss_element = 0.5 * (2 * tf.math.log(tf.maximum(std_prior, 1e-9)) - 2 * tf.math.log(tf.maximum(std_post,
                                                                                                                1e-9)) +
                                      (tf.math.pow(std_post, 2) + tf.math.pow((z_mean_post_all - z_mean_prior_all), 2)) /
-                                     tf.maximum(tf.math.pow(z_mean_prior_all, 2), 1e-9) - 1)
+                                     tf.maximum(tf.math.pow(std_prior, 2), 1e-9) - 1)
             kl_loss_all = tf.reduce_mean(kl_loss_element)
 
             loss += mse_reconstruction * reconstruction_imbalance + kl_loss_all * kl_imbalance + mse_generate * generated_mse_imbalance
@@ -286,13 +291,19 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
                             encode_h_test = tf.Variable(tf.zeros(shape=(batch_test, hidden_size)))
 
                         encode_c_test, encode_h_test = encode_share([sequence_time_test, encode_c_test, encode_h_test])
+
+                    if predicted_visit_ != 0:
+                        for i in range(predicted_visit_):
+                            sequence_input_t = generated_trajectory_test[:, i, :]
+                            encode_c_test, encode_h_test = encode_share([sequence_input_t, encode_c_test, encode_h_test])
+
                     context_state_test = encode_h_test
                     z_prior_test, z_mean_prior_test, z_log_var_prior_test = prior_net(context_state_test)
 
                     if predicted_visit_ == 0:
                         decode_c_generate_test = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
                         decode_h_generate_test = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
-                        sequence_last_time_test = input_x_test[:, previous_visit_ + previous_visit - 1, :]
+                        sequence_last_time_test = input_x_test[:, predicted_visit_ + previous_visit - 1, :]
 
                     sequence_last_time_test, decode_c_generate_test, decode_h_generate_test = decode_share([z_prior_test, context_state_test, sequence_last_time_test, decode_c_generate_test, decode_h_generate_test])
                     generated_next_visit_test = sequence_last_time_test
@@ -320,8 +331,8 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
                                                                                       np.mean(r_value_all),
                                                                                       count))
     tf.compat.v1.reset_default_graph()
-    # return -1 * mse_generate_test, np.mean(r_value_all)
-    return -1*mse_generate_test
+    return mse_generate_test, mae_generate_test, np.mean(r_value_all)
+    # return -1*mse_generate_test
 
 
 def test_test(name):
@@ -347,33 +358,38 @@ def test_test(name):
 
 
 if __name__ == '__main__':
-    test_test('VAE_青光眼——train_3_3.txt')
-    Encode_Decode_Time_BO = BayesianOptimization(
-        train, {
-            'hidden_size': (5, 8),
-            'z_dims': (5, 8),
-            'learning_rate': (-5, -1),
-            'l2_regularization': (-5, -1),
-            'kl_imbalance':  (-6, 1),
-            'reconstruction_imbalance': (-6, 1),
-            'generated_mse_imbalance': (-6, -1),
-        }
-    )
-    Encode_Decode_Time_BO.maximize()
-    print(Encode_Decode_Time_BO.max)
-    # mse_all = []
-    # r_value_all = []
-    # for i in range(50):
-    #     mse, r_value = train(hidden_size=6.039,
-    #                          learning_rate=-1.959,
-    #                          l2_regularization=-2.232,
-    #                          z_dims=5.335,
-    #                          kl_imbalance=-3.989,
-    #                          generated_mse_imbalance=-5.219,
-    #                          reconstruction_imbalance=0.4812)
-    #     mse_all.append(mse)
-    #     r_value_all.append(r_value)
-    #     print("r_value_ave  {}  mse_all_ave {}  r_value_std {}----mse_all_std  {}".format(np.mean(r_value), np.mean(mse_all), np.std(r_value_all), np.std(mse_all)))
+    test_test('VAE_青光眼_test_3_3_7_18.txt')
+    # Encode_Decode_Time_BO = BayesianOptimization(
+    #     train, {
+    #         'hidden_size': (5, 8),
+    #         'z_dims': (5, 8),
+    #         'learning_rate': (-5, -1),
+    #         'l2_regularization': (-5, -1),
+    #         'kl_imbalance':  (-6, 1),
+    #         'reconstruction_imbalance': (-6, 1),
+    #         'generated_mse_imbalance': (-6, -1),
+    #     }
+    # )
+    # Encode_Decode_Time_BO.maximize()
+    # print(Encode_Decode_Time_BO.max)
+    mse_all = []
+    r_value_all = []
+    mae_all = []
+    for i in range(50):
+        mse, mae, r_value = train(hidden_size=32,
+                                  learning_rate=0.005686519630243845,
+                                  l2_regularization=1.0101545386867363e-05,
+                                  z_dims=32,
+                                  kl_imbalance=4.042659336415265,
+                                  generated_mse_imbalance=0.04670594856700065,
+                                  reconstruction_imbalance=0.00019355771673396988)
+        mse_all.append(mse)
+        r_value_all.append(r_value)
+        mae_all.append(mae)
+        print("epoch{}----r_value_ave  {}  mse_all_ave {}  mae_all_ave  {}  "
+              "r_value_std {}----mse_all_std  {}  mae_std {}".
+              format(i, np.mean(r_value_all), np.mean(mse_all),
+                     np.mean(mae_all), np.std(r_value_all), np.std(mse_all), np.std(mae_all)))
 
 
 

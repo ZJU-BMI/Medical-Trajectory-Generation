@@ -52,17 +52,17 @@ class Decoder(Model):
 
 def train(hidden_size, learning_rate, l2_regularization):
 
-    # train_set = np.load('../../Trajectory_generate/HF_train_.npy').reshape(-1, 6, 30)[:, :, 1:]
-    # # test_set = np.load('../../Trajectory_generate/HF_validate_.npy').reshape(-1, 6, 30)[:, :, 1:]
-    # test_set = np.load('../../Trajectory_generate/HF_test_.npy').reshape(-1, 6, 30)[:, :, 1:]
+    train_set = np.load('../../Trajectory_generate/dataset_file/HF_train_.npy').reshape(-1, 6, 30)[:, :, 1:]
+    # test_set = np.load('../../Trajectory_generate/dataset_file/HF_validate_.npy').reshape(-1, 6, 30)[:, :, 1:]
+    test_set = np.load('../../Trajectory_generate/dataset_file/HF_test_.npy').reshape(-1, 6, 30)[:, :, 1:]
 
     # train_set = np.load("../../Trajectory_generate/dataset_file/train_x_.npy").reshape(-1, 6, 60)[:, :, 1:]
     # test_set = np.load("../../Trajectory_generate/dataset_file/test_x.npy").reshape(-1, 6, 60)[:, :, 1:]
-    # # test_set = np.load("../../Trajectory_generate/dataset_file/validate_x_.npy").reshape(-1, 6, 60)[:, :, 1:]
+    # test_set = np.load("../../Trajectory_generate/dataset_file/validate_x_.npy").reshape(-1, 6, 60)[:, :, 1:]
 
-    train_set = np.load("../../Trajectory_generate/dataset_file/mimic_train_x_.npy").reshape(-1, 6, 37)[:, :, 1:]
+    # train_set = np.load("../../Trajectory_generate/dataset_file/mimic_train_x_.npy").reshape(-1, 6, 37)[:, :, 1:]
     # test_set = np.load("../../Trajectory_generate/dataset_file/mimic_test_x_.npy").reshape(-1, 6, 37)[:, :, 1:]
-    test_set = np.load("../../Trajectory_generate/dataset_file/mimic_validate_.npy").reshape(-1, 6, 37)[:, :, 1:]
+    # test_set = np.load("../../Trajectory_generate/dataset_file/mimic_validate_.npy").reshape(-1, 6, 37)[:, :, 1:]
 
     previous_visit = 3
     predicted_visit = 3
@@ -75,9 +75,9 @@ def train(hidden_size, learning_rate, l2_regularization):
 
     epochs = 50
 
-    hidden_size = 2 ** (int(hidden_size))
-    learning_rate = 10 ** learning_rate
-    l2_regularization = 10 ** l2_regularization
+    # hidden_size = 2 ** (int(hidden_size))
+    # learning_rate = 10 ** learning_rate
+    # l2_regularization = 10 ** l2_regularization
 
     print('hidden_size{}-----learning_rate{}----l2_regularization{}----'.format(hidden_size, learning_rate, l2_regularization))
 
@@ -151,12 +151,18 @@ def train(hidden_size, learning_rate, l2_regularization):
                 for predicted_visit_ in range(predicted_visit):
                     if predicted_visit_ == 0:
                         sequence_time_last_time_test = input_x_test[:, predicted_visit_+previous_visit-1, :]
-                    for previous_visit_ in range(previous_visit+predicted_visit_):
+                    for previous_visit_ in range(previous_visit):
                         sequence_time_test = input_x_test[:, previous_visit_, :]
                         if previous_visit_ == 0:
                             encode_c_test = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
                             encode_h_test = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
                         encode_c_test, encode_h_test = encode_share([sequence_time_test, encode_c_test, encode_h_test])
+
+                    if predicted_visit_ != 0:
+                        for i in range(predicted_visit_):
+                            sequence_input_t = predicted_trajectory_test[:, i, :]
+                            encode_c_test, encode_h_test = encode_share([sequence_input_t, encode_c_test, encode_h_test])
+
                     context_state = encode_h_test
 
                     if predicted_visit_ == 0:
@@ -179,10 +185,9 @@ def train(hidden_size, learning_rate, l2_regularization):
                     r_value_all.append(r_value_[0])
                     p_value_all.append(r_value_[1])
                 print('------epoch{}------mse_loss{}----predicted_mse-----{}---predicted_r_value---{}--count  {}'.format(train_set.epoch_completed, mse_loss, mse_loss_predicted, np.mean(r_value_all), count))
-    # return -1*mse_loss_predicted
     tf.compat.v1.reset_default_graph()
-    # return mse_loss_predicted, mae_predicted, np.mean(r_value_all), np.mean(p_value_all)
-    return -1*mse_loss_predicted
+    return mse_loss_predicted, mae_predicted, np.mean(r_value_all), np.mean(p_value_all)
+    # return -1*mse_loss_predicted
 
 
 def test_test(name):
@@ -208,33 +213,35 @@ def test_test(name):
 
 
 if __name__ == '__main__':
-    test_test('AED_MIMIC——test_3_3.txt')
-    Encode_Decode_Time_BO = BayesianOptimization(
-        train, {
-            'hidden_size': (5, 8),
-            'learning_rate': (-5, -1),
-            'l2_regularization': (-5, -1),
-        }
-    )
-    Encode_Decode_Time_BO.maximize()
-    print(Encode_Decode_Time_BO.max)
+    test_test('AED_——HF_test__3_3.txt')
+    # Encode_Decode_Time_BO = BayesianOptimization(
+    #     train, {
+    #         'hidden_size': (5, 8),
+    #         'learning_rate': (-5, -1),
+    #         'l2_regularization': (-5, -1),
+    #     }
+    # )
+    # Encode_Decode_Time_BO.maximize()
+    # print(Encode_Decode_Time_BO.max)
 
-    # mse_all = []
-    # mae_all = []
-    # r_value_all = []
-    # p_value_all = []
-    # for i in range(50):
-    #     mse, mae, r_value, p_value = train(hidden_size=64,
-    #                                        learning_rate=0.0009432410970323817,
-    #                                        l2_regularization=1.105119709286199e-05)
-    #     mse_all.append(mse)
-    #     r_value_all.append(r_value)
-    #     p_value_all.append(p_value)
-    #     mae_all.append(mae)
-    #     print('epoch  {}-----mse-all  {}----mae_all-'
-    #           '----{}---r_value  {}--'
-    #           '---p_value  {}----'.format(i, np.mean(mse_all), np.mean(mae_all),
-    #                                       np.mean(r_value_all), np.mean(p_value_all)))
+    mse_all = []
+    mae_all = []
+    r_value_all = []
+    p_value_all = []
+    for i in range(50):
+        mse, mae, r_value, p_value = train(hidden_size=64,
+                                           learning_rate=0.0015576418547285878,
+                                           l2_regularization=1e-05)
+        mse_all.append(mse)
+        r_value_all.append(r_value)
+        p_value_all.append(p_value)
+        mae_all.append(mae)
+        print('epoch  {}-----mse-all_ave  {}----mae_all_ave-----{}---r_value_ave  {}--'
+              '---p_value_ave  {}--  mse_vale_std{}------mae_vale_std{}---r_value_std{}  p_value_std-'.
+              format(i, np.mean(mse_all), np.mean(mae_all),
+                     np.mean(r_value_all), np.mean(p_value_all),
+                     np.std(mse_all), np.std(mae_all),
+                     np.std(r_value_all), np.std(p_value_all)))
 
 
 
