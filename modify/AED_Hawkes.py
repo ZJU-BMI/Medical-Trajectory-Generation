@@ -17,8 +17,8 @@ for gpu in gpus:
 
 def train(hidden_size, l2_regularization, learning_rate, generated_imbalance, likelihood_imbalance):
     train_set = np.load("../../Trajectory_generate/dataset_file/train_x_.npy").reshape(-1, 6, 60)
-    # test_set = np.load("../../Trajectory_generate/dataset_file/test_x.npy").reshape(-1, 6, 60)
-    test_set = np.load("../../Trajectory_generate/dataset_file/validate_x_.npy").reshape(-1, 6, 60)
+    test_set = np.load("../../Trajectory_generate/dataset_file/test_x.npy").reshape(-1, 6, 60)
+    # test_set = np.load("../../Trajectory_generate/dataset_file/validate_x_.npy").reshape(-1, 6, 60)
 
     previous_visit = 3
     predicted_visit = 3
@@ -30,11 +30,11 @@ def train(hidden_size, l2_regularization, learning_rate, generated_imbalance, li
     batch_size = 64
     epochs = 50
 
-    hidden_size = 2 ** (int(hidden_size))
-    learning_rate = 10 ** learning_rate
-    l2_regularization = 10 ** l2_regularization
-    generated_imbalance = 10 ** generated_imbalance
-    likelihood_imbalance = 10 ** likelihood_imbalance
+    # hidden_size = 2 ** (int(hidden_size))
+    # learning_rate = 10 ** learning_rate
+    # l2_regularization = 10 ** l2_regularization
+    # generated_imbalance = 10 ** generated_imbalance
+    # likelihood_imbalance = 10 ** likelihood_imbalance
 
     print('hidden_size----{}---'
           'l2_regularization---{}---'
@@ -51,12 +51,12 @@ def train(hidden_size, l2_regularization, learning_rate, generated_imbalance, li
     logged = set()
     max_loss = 0.01
     max_pace = 0.001
+    loss = 0
 
     count = 0
     optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate)
 
     while train_set.epoch_completed < epochs:
-        loss = 0
         input_train = train_set.next_batch(batch_size=batch_size)
         batch = input_train.shape[0]
         input_x_train = tf.cast(input_train[:, :, 1:], tf.float32)
@@ -180,26 +180,40 @@ def train(hidden_size, l2_regularization, learning_rate, generated_imbalance, li
                                                            np.mean(r_value_all),
                                                            count))
     tf.compat.v1.reset_default_graph()
-    # return mse_generated_test, mae_generated_test, np.mean(r_value_all)/
-    return -1 * mse_generated_loss_test
+    return mse_generated_loss_test, mae_generated_loss_test, np.mean(r_value_all)
+    # return -1 * mse_generated_loss_test
 
 
 if __name__ == '__main__':
-    test_test('AED_Hawkes_青光眼_train_3_3_7_18.txt')
-    Encode_Decode_Time_BO = BayesianOptimization(
-        train, {
-            'hidden_size': (5, 8),
-            'learning_rate': (-5, 1),
-            'l2_regularization': (-5, 1),
-            'generated_imbalance': (-6, 1),
-            'likelihood_imbalance': (-6, 1)
-        }
-    )
-    Encode_Decode_Time_BO.maximize()
-    print(Encode_Decode_Time_BO.max)
+    test_test('AED_Hawkes_青光眼_test_3_3_7_18.txt')
+    # Encode_Decode_Time_BO = BayesianOptimization(
+    #     train, {
+    #         'hidden_size': (5, 8),
+    #         'learning_rate': (-5, 1),
+    #         'l2_regularization': (-5, 1),
+    #         'generated_imbalance': (-6, 1),
+    #         'likelihood_imbalance': (-6, 1)
+    #     }
+    # )
+    # Encode_Decode_Time_BO.maximize()
+    # print(Encode_Decode_Time_BO.max)
 
-
-
+    mse_all = []
+    r_value_all = []
+    mae_all = []
+    for i in range(50):
+        mse, mae, r_value = train(hidden_size=128,
+                                  learning_rate=0.008823066301767246,
+                                  l2_regularization=3.017286348529315e-05,
+                                  generated_imbalance=0.47383867868002144,
+                                  likelihood_imbalance=0.0030426563595897745)
+        mse_all.append(mse)
+        r_value_all.append(r_value)
+        mae_all.append(mae)
+        print("epoch---{}---r_value_ave  {}  mse_all_ave {}  mae_all_ave  {}  "
+              "r_value_std {}----mse_all_std  {}  mae_std {}".
+              format(i, np.mean(r_value_all), np.mean(mse_all), np.mean(mae_all),
+                     np.std(r_value_all), np.std(mse_all),np.std(mae_all)))
 
 
 

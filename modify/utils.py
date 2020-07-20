@@ -3,6 +3,7 @@ import numpy as np
 from tensorflow_core.python.keras.models import Model
 import sys
 import os
+from sklearn.metrics import mean_squared_error
 
 
 # transform each step of x, i.e. x_i into h_i
@@ -144,12 +145,3 @@ def test_test(name):
     print(path)
     print(os.path.dirname(__file__))
     print('------------------')
-
-
-if __name__ == '__main__':
-    x = np.zeros(shape=(5, 2, 5))
-    y = np.ones(shape=(5, 3, 5))
-    m = np.concatenate((x, y), axis=1)
-
-    n = np.maximum(m, 0.1)
-    print(n)

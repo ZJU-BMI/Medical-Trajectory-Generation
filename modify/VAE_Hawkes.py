@@ -218,8 +218,8 @@ def kl_loss(z_mean_post, log_var_post, z_mean_prior, log_var_prior):
 
 def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, reconstruction_imbalance, generated_mse_imbalance, likelihood_imbalance):
     train_set = np.load("../../Trajectory_generate/dataset_file/train_x_.npy").reshape(-1, 6, 60)
-    # test_set = np.load("../../Trajectory_generate/dataset_file/test_x.npy").reshape(-1, 6, 60)
-    test_set = np.load("../../Trajectory_generate/dataset_file/validate_x_.npy").reshape(-1, 6, 60)
+    test_set = np.load("../../Trajectory_generate/dataset_file/test_x.npy").reshape(-1, 6, 60)
+    # test_set = np.load("../../Trajectory_generate/dataset_file/validate_x_.npy").reshape(-1, 6, 60)
 
     # train_set = np.load('../../Trajectory_generate/dataset_file/HF_train_.npy').reshape(-1, 6, 30)
     # test_set = np.load('../../Trajectory_generate/dataset_file/HF_validate_.npy').reshape(-1, 6, 30)
@@ -235,14 +235,14 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
     batch_size = 64
     epochs = 50
 
-    hidden_size = 2 ** (int(hidden_size))
-    z_dims = 2 ** (int(z_dims))
-    learning_rate = 10 ** learning_rate
-    l2_regularization = 10 ** l2_regularization
-    kl_imbalance = 10 ** kl_imbalance
-    reconstruction_imbalance = 10 ** reconstruction_imbalance
-    generated_mse_imbalance = 10 ** generated_mse_imbalance
-    likelihood_imbalance = 10 ** likelihood_imbalance
+    # hidden_size = 2 ** (int(hidden_size))
+    # z_dims = 2 ** (int(z_dims))
+    # learning_rate = 10 ** learning_rate
+    # l2_regularization = 10 ** l2_regularization
+    # kl_imbalance = 10 ** kl_imbalance
+    # reconstruction_imbalance = 10 ** reconstruction_imbalance
+    # generated_mse_imbalance = 10 ** generated_mse_imbalance
+    # likelihood_imbalance = 10 ** likelihood_imbalance
 
     print('hidden_size{}----z_dims{}------learning_rate{}----l2_regularization{}---'
           'kl_imbalance{}----reconstruction_imbalance '
@@ -388,7 +388,7 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
                 batch_test = input_x_test.shape[0]
                 generated_trajectory_test = tf.zeros(shape=[batch_test, 0, feature_dims])
                 for predicted_visit_ in range(predicted_visit):
-                    for previous_visit_ in range(previous_visit+predicted_visit_):
+                    for previous_visit_ in range(previous_visit):
                         sequence_time_test = input_x_test[:, previous_visit_, :]
                         if previous_visit_ == 0:
                             encode_c_test = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
@@ -442,46 +442,46 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
                                                                                       count))
 
     tf.compat.v1.reset_default_graph()
-    # return mse_generated_test, mae_generated_test, np.mean(r_value_all)/
-    return -1 * mse_generated_test
+    return mse_generated_test, mae_generated_test, np.mean(r_value_all)
+    # return -1 * mse_generated_test
 
 
 if __name__ == '__main__':
-    test_test('VAE_Hawkes_青光眼_train_3_3_7_18.txt')
-    Encode_Decode_Time_BO = BayesianOptimization(
-        train, {
-            'hidden_size': (5, 8),
-            'z_dims': (5, 8),
-            'learning_rate': (-5, 1),
-            'l2_regularization': (-5, 1),
-            'kl_imbalance':  (-6, 1),
-            'reconstruction_imbalance': (-6, 1),
-            'generated_mse_imbalance': (-6, 1),
-            'likelihood_imbalance': (-6, 1)
-        }
-    )
-    Encode_Decode_Time_BO.maximize()
-    print(Encode_Decode_Time_BO.max)
+    test_test('VAE_Hawkes_青光眼_模型保存测试_3_3_7_18_v1.txt')
+    # Encode_Decode_Time_BO = BayesianOptimization(
+    #     train, {
+    #         'hidden_size': (5, 8),
+    #         'z_dims': (5, 8),
+    #         'learning_rate': (-5, 1),
+    #         'l2_regularization': (-5, 1),
+    #         'kl_imbalance':  (-6, 1),
+    #         'reconstruction_imbalance': (-6, 1),
+    #         'generated_mse_imbalance': (-6, 1),
+    #         'likelihood_imbalance': (-6, 1)
+    #     }
+    # )
+    # Encode_Decode_Time_BO.maximize()
+    # print(Encode_Decode_Time_BO.max)
 
-    # mse_all = []
-    # r_value_all = []
-    # mae_all = []
-    # for i in range(50):
-    #     mse, mae, r_value = train(hidden_size=64,
-    #                               learning_rate=0.0017223840663083462,
-    #                               l2_regularization=0.0007055365330329766,
-    #                               z_dims=64,
-    #                               kl_imbalance=0.34030525789357874,
-    #                               generated_mse_imbalance=2.034720473096054e-05,
-    #                               reconstruction_imbalance=2.435011557029785,
-    #                               likelihood_imbalance=10**(-3.729))
-    #     mse_all.append(mse)
-    #     r_value_all.append(r_value)
-    #     mae_all.append(mae)
-    #     print("epoch---{}---r_value_ave  {}  mse_all_ave {}  mae_all_ave  {}  "
-    #           "r_value_std {}----mse_all_std  {}  mae_std {}".
-    #           format(i, np.mean(r_value_all), np.mean(mse_all), np.mean(mae_all),
-    #                  np.std(r_value_all), np.std(mse_all),np.std(mae_all)))
+    mse_all = []
+    r_value_all = []
+    mae_all = []
+    for i in range(50):
+        mse, mae, r_value = train(hidden_size=64,
+                                  learning_rate=0.020365254959864056,
+                                  l2_regularization=0.00016667670234679166,
+                                  z_dims=64,
+                                  kl_imbalance=0.5217276962940972,
+                                  generated_mse_imbalance=0.2841000446194281,
+                                  reconstruction_imbalance=0.00016475205018620588,
+                                  likelihood_imbalance=10**(-0.4587576385487912))
+        mse_all.append(mse)
+        r_value_all.append(r_value)
+        mae_all.append(mae)
+        print("epoch---{}---r_value_ave  {}  mse_all_ave {}  mae_all_ave  {}  "
+              "r_value_std {}----mse_all_std  {}  mae_std {}".
+              format(i, np.mean(r_value_all), np.mean(mse_all), np.mean(mae_all),
+                     np.std(r_value_all), np.std(mse_all),np.std(mae_all)))
 
 
 
