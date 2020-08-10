@@ -368,31 +368,6 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
                                                                                       np.mean(r_value_all),
                                                                                       count))
 
-        # if mse_generated_test < 0.008 and train_set.epoch_completed > 40:
-        #     checkpoint_encode_share = tf.train.Checkpoint(encode_share=encode_share)
-        #     path = './model/encoder_share/' + str(train_set.epoch_completed) + '.ckpt'
-        #     path_encoder = checkpoint_encode_share.save(path)
-        #     print(path_encoder)
-        #
-        #     checkpoint_decode_share = tf.train.Checkpoint(decoder_share=decoder_share)
-        #     path = './model/decoder_share/' + str(train_set.epoch_completed) + '.ckpt'
-        #     path_decoder = checkpoint_decode_share.save(path)
-        #     print(path_decoder)
-        #
-        #     checkpoint_post = tf.train.Checkpoint(post_net=post_net)
-        #     path = './model/checkpoint_post/' + str(train_set.epoch_completed) + '.ckpt'
-        #     path_post = checkpoint_post.save(path)
-        #     print(path_post)
-        #
-        #     checkpoint_prior = tf.train.Checkpoint(prior_net=prior_net)
-        #     path = './model/checkpoint_prior/' + str(train_set.epoch_completed) + '.ckpt'
-        #     path_prior = checkpoint_prior.save(path)
-        #     print(path_prior)
-        #
-        #     checkpoint_hawkes = tf.train.Checkpoint(hawkes_process=hawkes_process)
-        #     path = './model/checkpoint_hawkes/' + str(train_set.epoch_completed) + '.ckpt'
-        #     path_hawkes = checkpoint_hawkes.save(path)
-        #     print(path_hawkes)
 
     tf.compat.v1.reset_default_graph()
     # return mse_generated_test, mae_generated_test, np.mean(r_value_all)
