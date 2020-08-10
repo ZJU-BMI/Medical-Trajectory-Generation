@@ -145,10 +145,95 @@ class Decoder(Model):
         return y_3, state[0], state[1]
 
 
+# 输入input_t, 输出lambda_(t_(i+1)), f(t_(i+1))
+class HawkesProcess(Model):
+    def __init__(self):
+        super().__init__(name='point_process')
+
+    def build(self, input_shape):
+        shape_weight = tf.TensorShape((1, 1))
+
+        self.trigger_parameter_alpha = self.add_weight(name='trigger_alpha',
+                                                       shape=shape_weight,
+                                                       initializer='uniform',
+                                                       trainable=True)
+
+        self.trigger_parameter_beta = self.add_weight(name='trigger_beta',
+                                                      shape=shape_weight,
+                                                      initializer='uniform',
+                                                      trainable=True)
+
+        self.base_intensity = self.add_weight(name='trigger_beta',
+                                              shape=shape_weight,
+                                              initializer='uniform',
+                                              trainable=True)
+        super(HawkesProcess, self).build(input_shape)
+
+    def calculate_lambda_process(self, input_t, current_time_index, trigger_alpha, trigger_beta, base_intensity):
+        batch = tf.shape(input_t)[0]
+        current_t = tf.reshape(input_t[:, current_time_index], [batch, -1])
+        current_t_tile = tf.tile(current_t, [1, current_time_index])
+
+        time_before_t = input_t[:, :current_time_index]
+
+        time_difference = time_before_t - current_t_tile
+
+        trigger_kernel = tf.reduce_sum(tf.exp(trigger_beta * time_difference), axis=1)
+        trigger_kernel = tf.reshape(trigger_kernel, [batch, 1])
+
+        condition_intensity_value = base_intensity + trigger_kernel * trigger_alpha
+        return condition_intensity_value
+
+    def calculate_likelihood(self, input_t, current_time_index, trigger_alpha, trigger_beta, base_intensity):
+        batch = tf.shape(input_t)[0]
+        ratio_alpha_beta = trigger_alpha / trigger_beta
+
+        current_t = tf.reshape(input_t[:, current_time_index], [batch, 1])
+        current_t_tile = tf.tile(current_t, [1, current_time_index])
+
+        time_before_t = input_t[:, :current_time_index]
+
+        # part_1: t_i -t(<i)
+        time_difference = time_before_t - current_t_tile
+
+        trigger_kernel = tf.reduce_sum(tf.exp(trigger_beta * time_difference), axis=1)
+        trigger_kernel = tf.reshape(trigger_kernel, [batch, 1])
+
+        conditional_intensity = base_intensity + trigger_alpha * trigger_kernel  # part 1 result
+
+        # part_2: t_i - t_(i-1)
+        last_time = input_t[:, current_time_index-1]
+        time_difference_2 = (tf.reshape(last_time, [batch, 1]) - current_t) * base_intensity  # part 2 result
+
+        # part_3: t_(i-1) - t(<i)
+        last_time_tile = tf.tile(tf.reshape(last_time, [batch, 1]), [1, current_time_index])
+        time_difference_3 = time_before_t - last_time_tile
+        time_difference_3 = tf.reduce_sum(tf.exp(time_difference_3 * trigger_beta), axis=1)
+        time_difference_3 = tf.reshape(time_difference_3, [batch, 1])
+
+        probability_result = conditional_intensity * tf.exp(time_difference_2 + ratio_alpha_beta*(trigger_kernel - time_difference_3))
+
+        return probability_result
+
+    def call(self, input_x):
+        input_t, current_time_index_shape = input_x
+        current_time_index = tf.shape(current_time_index_shape)[0]
+        batch = tf.shape(input_t)[0]
+        trigger_alpha = tf.tile(tf.keras.activations.sigmoid(self.trigger_parameter_alpha), [batch, 1])
+        trigger_beta = tf.tile(tf.keras.activations.sigmoid(self.trigger_parameter_beta), [batch, 1])
+        base_intensity = tf.tile(tf.keras.activations.sigmoid(self.base_intensity), [batch, 1])
+
+        condition_intensity = self.calculate_lambda_process(input_t, current_time_index,
+                                                            trigger_alpha, trigger_beta, base_intensity)
+        likelihood = self.calculate_likelihood(input_t, current_time_index, trigger_alpha,
+                                               trigger_beta, base_intensity)
+        return condition_intensity, likelihood
+
+
 def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generated_mse_imbalance, generated_loss_imbalance, kl_imbalance, reconstruction_mse_imbalance, likelihood_imbalance):
     train_set = np.load('../../Trajectory_generate/dataset_file/HF_train_.npy').reshape(-1, 6, 30)
-    # test_set = np.load('../../Trajectory_generate/dataset_file/HF_validate_.npy').reshape(-1, 6, 30)
-    test_set = np.load('../../Trajectory_generate/dataset_file/HF_test_.npy').reshape(-1, 6, 30)
+    test_set = np.load('../../Trajectory_generate/dataset_file/HF_validate_.npy').reshape(-1, 6, 30)
+    # test_set = np.load('../../Trajectory_generate/dataset_file/HF_test_.npy').reshape(-1, 6, 30)
 
     previous_visit = 3
     predicted_visit = 3
@@ -160,16 +245,16 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
     batch_size = 64
     epochs = 50
 
-    # hidden_size = 2**(int(hidden_size))
-    # z_dims = 2**(int(z_dims))
-    # l2_regularization = 10 ** l2_regularization
-    # learning_rate = 10 ** learning_rate
-    # n_disc = int(n_disc)
-    # generated_mse_imbalance = 10 ** generated_mse_imbalance
-    # generated_loss_imbalance = 10 ** generated_loss_imbalance
-    # kl_imbalance = 10 ** kl_imbalance
-    # reconstruction_mse_imbalance = 10 ** reconstruction_mse_imbalance
-    # likelihood_imbalance = 10 ** likelihood_imbalance
+    hidden_size = 2**(int(hidden_size))
+    z_dims = 2**(int(z_dims))
+    l2_regularization = 10 ** l2_regularization
+    learning_rate = 10 ** learning_rate
+    n_disc = int(n_disc)
+    generated_mse_imbalance = 10 ** generated_mse_imbalance
+    generated_loss_imbalance = 10 ** generated_loss_imbalance
+    kl_imbalance = 10 ** kl_imbalance
+    reconstruction_mse_imbalance = 10 ** reconstruction_mse_imbalance
+    likelihood_imbalance = 10 ** likelihood_imbalance
 
     print('previous_visit---{}---predicted_visit----{}-'.format(previous_visit, predicted_visit))
 
@@ -255,6 +340,7 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
 
                 z_log_var_post_all = tf.concat((z_log_var_post_all, tf.reshape(z_log_var_post, [batch, -1, z_dims])), axis=1)
                 z_log_var_prior_all = tf.concat((z_log_var_prior_all, tf.reshape(z_log_var_prior, [batch, -1, z_dims])), axis=1)
+                weights = hawkes_process.get_weights()
 
             d_real_pre_, d_fake_pre_ = discriminator(input_x_train, generated_trajectory)
             d_real_pre_loss = cross_entropy(tf.ones_like(d_real_pre_), d_real_pre_)
@@ -334,9 +420,9 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
 
             input_x_test = tf.cast(test_set[:, :, 1:], tf.float32)
             input_t_test = tf.cast(test_set[:, :, 0], tf.float32)
-            one_year_time = np.load('../../Trajectory_generate/resource/HF_1_year__time.npy')
-            two_year_time = np.load('../../Trajectory_generate/resource/HF_2_year_time.npy')
-            three_month_time = np.load('../../Trajectory_generate/resource/HF_3_month_time.npy')
+            # one_year_time = np.load('../../Trajectory_generate/resource/HF_1_year__time.npy')
+            # two_year_time = np.load('../../Trajectory_generate/resource/HF_2_year_time.npy')
+            # three_month_time = np.load('../../Trajectory_generate/resource/HF_3_month_time.npy')
 
             batch_test = test_set.shape[0]
             generated_trajectory_test = tf.zeros(shape=[batch_test, 0, feature_dims])
@@ -379,34 +465,34 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
                 generated_trajectory_test = tf.concat((generated_trajectory_test, tf.reshape(generated_next_visit_test, [batch_test, -1, feature_dims])), axis=1)
 
                 # 3个月时间输入生成
-                intensity_value_test_3_month, likelihood_test_3_month = hawkes_process([three_month_time, current_time_index_shape_test])
-                z_prior_test_3_month, z_mean_prior_test_3_month, z_log_var_prior_test_3_month = prior_net(context_state_test*intensity_value_test_3_month)
-                generated_next_visit_test_3_month, decode_c_generate_test_3_month, decode_h_generate_test_3_month = decoder_share([z_prior_test_3_month, decode_c_generate_test_3_month, decode_h_generate_test_3_month])
-                generated_trajectory_test_3_month = tf.concat((generated_trajectory_test_3_month, tf.reshape(generated_next_visit_test_3_month, [batch_test, -1, feature_dims])), axis=1)
+                # intensity_value_test_3_month, likelihood_test_3_month = hawkes_process([three_month_time, current_time_index_shape_test])
+                # z_prior_test_3_month, z_mean_prior_test_3_month, z_log_var_prior_test_3_month = prior_net(context_state_test*intensity_value_test_3_month)
+                # generated_next_visit_test_3_month, decode_c_generate_test_3_month, decode_h_generate_test_3_month = decoder_share([z_prior_test_3_month, decode_c_generate_test_3_month, decode_h_generate_test_3_month])
+                # generated_trajectory_test_3_month = tf.concat((generated_trajectory_test_3_month, tf.reshape(generated_next_visit_test_3_month, [batch_test, -1, feature_dims])), axis=1)
 
                 # 1年时间输入生成
-                intensity_value_test_one_year, likelihood_test_one_year = hawkes_process([one_year_time, current_time_index_shape_test])
-                z_prior_test_one_year, z_mean_prior_test_one_year, z_log_var_prior_test_one_year = prior_net(context_state_test * intensity_value_test_one_year)
-                generated_next_visit_test_one_year, decode_c_generate_test_one_year, decode_h_generate_test_one_year = decoder_share([z_prior_test_one_year, decode_c_generate_test_one_year, decode_h_generate_test_one_year])
-                generated_trajectory_test_one_year = tf.concat((generated_trajectory_test_one_year, tf.reshape(generated_next_visit_test_one_year, [batch_test, -1, feature_dims])), axis=1)
-
-                # 2年时间输入
-                intensity_value_test_two_year, likelihood_test_two_year = hawkes_process([two_year_time, current_time_index_shape_test])
-                z_prior_test_two_year, z_mean_prior_test_two_year, z_log_var_prior_test_two_year = prior_net(context_state_test * intensity_value_test_two_year)
-                generated_next_visit_test_two_year, decode_c_generate_test_two_year, decode_h_generate_test_two_year = decoder_share([z_prior_test_two_year, decode_c_generate_test_two_year, decode_h_generate_test_two_year])
-                generated_trajectory_test_two_year = tf.concat((generated_trajectory_test_two_year, tf.reshape(generated_next_visit_test_two_year, [batch_test, -1, feature_dims])), axis=1)
+                # intensity_value_test_one_year, likelihood_test_one_year = hawkes_process([one_year_time, current_time_index_shape_test])
+                # z_prior_test_one_year, z_mean_prior_test_one_year, z_log_var_prior_test_one_year = prior_net(context_state_test * intensity_value_test_one_year)
+                # generated_next_visit_test_one_year, decode_c_generate_test_one_year, decode_h_generate_test_one_year = decoder_share([z_prior_test_one_year, decode_c_generate_test_one_year, decode_h_generate_test_one_year])
+                # generated_trajectory_test_one_year = tf.concat((generated_trajectory_test_one_year, tf.reshape(generated_next_visit_test_one_year, [batch_test, -1, feature_dims])), axis=1)
+                #
+                # # 2年时间输入
+                # intensity_value_test_two_year, likelihood_test_two_year = hawkes_process([two_year_time, current_time_index_shape_test])
+                # z_prior_test_two_year, z_mean_prior_test_two_year, z_log_var_prior_test_two_year = prior_net(context_state_test * intensity_value_test_two_year)
+                # generated_next_visit_test_two_year, decode_c_generate_test_two_year, decode_h_generate_test_two_year = decoder_share([z_prior_test_two_year, decode_c_generate_test_two_year, decode_h_generate_test_two_year])
+                # generated_trajectory_test_two_year = tf.concat((generated_trajectory_test_two_year, tf.reshape(generated_next_visit_test_two_year, [batch_test, -1, feature_dims])), axis=1)
 
             mse_generated_test = tf.reduce_mean(tf.keras.losses.mse(input_x_test[:, previous_visit:previous_visit+predicted_visit, :], generated_trajectory_test))
             mae_generated_test = tf.reduce_mean(tf.keras.losses.mae(input_x_test[:, previous_visit:previous_visit+predicted_visit, :], generated_trajectory_test))
 
-            mse_generated_test_3_month = tf.reduce_mean(tf.keras.losses.mse(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_3_month))
-            mae_generated_test_3_month = tf.reduce_mean(tf.keras.losses.mae(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_3_month))
-
-            mse_generated_test_one_year = tf.reduce_mean( tf.keras.losses.mse(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_one_year))
-            mae_generated_test_one_year = tf.reduce_mean(tf.keras.losses.mae(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_one_year))
-
-            mse_generated_test_two_year = tf.reduce_mean(tf.keras.losses.mse(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_two_year))
-            mae_generated_test_two_year= tf.reduce_mean(tf.keras.losses.mae(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_two_year))
+            # mse_generated_test_3_month = tf.reduce_mean(tf.keras.losses.mse(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_3_month))
+            # mae_generated_test_3_month = tf.reduce_mean(tf.keras.losses.mae(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_3_month))
+            #
+            # mse_generated_test_one_year = tf.reduce_mean( tf.keras.losses.mse(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_one_year))
+            # mae_generated_test_one_year = tf.reduce_mean(tf.keras.losses.mae(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_one_year))
+            #
+            # mse_generated_test_two_year = tf.reduce_mean(tf.keras.losses.mse(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_two_year))
+            # mae_generated_test_two_year= tf.reduce_mean(tf.keras.losses.mae(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_two_year))
 
             r_value_all = []
             p_value_all = []
@@ -425,33 +511,33 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
                 r_value_all.append(r_value_[0])
                 p_value_all.append(r_value_[1])
 
-            for r in range(predicted_visit):
-                x_ = tf.reshape(input_x_test[:, previous_visit + r, :], (-1,))
-                y_ = tf.reshape(generated_trajectory_test_3_month[:, r, :], (-1,))
-                if (y_.numpy() == np.zeros_like(y_)).all():
-                    r_value_ = [0.0, 0.0]
-                else:
-                    r_value_ = stats.pearsonr(x_, y_)
-                r_value_all_3_month.append(r_value_[0])
-                p_value_all_3_month.append(r_value_[1])
-
-            for r in range(predicted_visit):
-                x_ = tf.reshape(input_x_test[:, previous_visit + r, :], (-1,))
-                y_ = tf.reshape(generated_trajectory_test_one_year[:, r, :], (-1,))
-                if (y_.numpy() == np.zeros_like(y_)).all():
-                    r_value_ = [0.0, 0.0]
-                else:
-                    r_value_ = stats.pearsonr(x_, y_)
-                r_value_all_one_year.append(r_value_[0])
-
-            for r in range(predicted_visit):
-                x_ = tf.reshape(input_x_test[:, previous_visit + r, :], (-1,))
-                y_ = tf.reshape(generated_trajectory_test_two_year[:, r, :], (-1,))
-                if (y_.numpy() == np.zeros_like(y_)).all():
-                    r_value_ = [0.0, 0.0]
-                else:
-                    r_value_ = stats.pearsonr(x_, y_)
-                r_value_all_two_year.append(r_value_[0])
+            # for r in range(predicted_visit):
+            #     x_ = tf.reshape(input_x_test[:, previous_visit + r, :], (-1,))
+            #     y_ = tf.reshape(generated_trajectory_test_3_month[:, r, :], (-1,))
+            #     if (y_.numpy() == np.zeros_like(y_)).all():
+            #         r_value_ = [0.0, 0.0]
+            #     else:
+            #         r_value_ = stats.pearsonr(x_, y_)
+            #     r_value_all_3_month.append(r_value_[0])
+            #     p_value_all_3_month.append(r_value_[1])
+            #
+            # for r in range(predicted_visit):
+            #     x_ = tf.reshape(input_x_test[:, previous_visit + r, :], (-1,))
+            #     y_ = tf.reshape(generated_trajectory_test_one_year[:, r, :], (-1,))
+            #     if (y_.numpy() == np.zeros_like(y_)).all():
+            #         r_value_ = [0.0, 0.0]
+            #     else:
+            #         r_value_ = stats.pearsonr(x_, y_)
+            #     r_value_all_one_year.append(r_value_[0])
+            #
+            # for r in range(predicted_visit):
+            #     x_ = tf.reshape(input_x_test[:, previous_visit + r, :], (-1,))
+            #     y_ = tf.reshape(generated_trajectory_test_two_year[:, r, :], (-1,))
+            #     if (y_.numpy() == np.zeros_like(y_)).all():
+            #         r_value_ = [0.0, 0.0]
+            #     else:
+            #         r_value_ = stats.pearsonr(x_, y_)
+            #     r_value_all_two_year.append(r_value_[0])
 
             print('epoch ---{}---train_mse_generated---{}---likelihood_loss{}---'
                   'train_mse_reconstruct---{}---train_kl---{}---'
@@ -461,71 +547,73 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
                                                           mse_generated_test, mae_generated_test,
                                                           np.mean(r_value_all), count))
 
-            print('epoch---{}---| test_mse_real---{}--| test_mse_3_month---{}-|-test_mse_one_year---{}--|-test_mse_two_year---{}-|'
-                  'test_mae_real---{}--|---mae_3_month---{}-|-test_mae_one_year--{}--|-test_mae_two_year---{}--|-'
-                  'test_r_value_real---{}--|-test_r_value_3_month---{}--|-test_r_value_one_year---{}--|-test_r_value_two_year---{}|--'
-                  '---count--{}'.format(train_set.epoch_completed,
-                                        mse_generated_test,
-                                        mse_generated_test_3_month,
-                                        mse_generated_test_one_year,
-                                        mse_generated_test_two_year,
-                                        mae_generated_test,
-                                        mae_generated_test_3_month,
-                                        mae_generated_test_one_year,
-                                        mae_generated_test_two_year,
-                                        np.mean(r_value_all),
-                                        np.mean(r_value_all_3_month),
-                                        np.mean(r_value_all_one_year),
-                                        np.mean(r_value_all_two_year),
-                                        count
-                                        ))
+            # print('epoch---{}---| test_mse_real---{}--| test_mse_3_month---{}-|-'
+            #       'test_mse_one_year---{}--|-test_mse_two_year---{}-|'
+            #       'test_mae_real---{}--|---mae_3_month---{}-|-test_mae_one_year--{}--|-test_mae_two_year---{}--|-'
+            #       'test_r_value_real---{}--|-test_r_value_3_month---{}-'
+            #       '-|-test_r_value_one_year---{}--|-test_r_value_two_year---{}|--'
+            #       '---count--{}'.format(train_set.epoch_completed,
+            #                             mse_generated_test,
+            #                             mse_generated_test_3_month,
+            #                             mse_generated_test_one_year,
+            #                             mse_generated_test_two_year,
+            #                             mae_generated_test,
+            #                             mae_generated_test_3_month,
+            #                             mae_generated_test_one_year,
+            #                             mae_generated_test_two_year,
+            #                             np.mean(r_value_all),
+            #                             np.mean(r_value_all_3_month),
+            #                             np.mean(r_value_all_one_year),
+            #                             np.mean(r_value_all_two_year),
+            #                             count
+            #                             ))
 
     tf.compat.v1.reset_default_graph()
-    return mse_generated_test, mae_generated_test, np.mean(r_value_all)
-    # return -1 * mse_generated_test
+    # return mse_generated_test, mae_generated_test, np.mean(r_value_all)
+    return -1 * mse_generated_test
 
 
 if __name__ == '__main__':
-    test_test('modify_proposed_train_1_1_不添加sigmoid_likelihood_HF_时间对比.txt')
-    # BO = BayesianOptimization(
-    #     train, {
-    #         'hidden_size': (5, 8),
-    #         'z_dims': (5, 8),
-    #         'n_disc': (1, 10),
-    #         'learning_rate': (-5, 1),
-    #         'l2_regularization': (-5, 1),
-    #         'kl_imbalance':  (-6, 1),
-    #         'reconstruction_mse_imbalance': (-6, 1),
-    #         'generated_mse_imbalance': (-6, 1),
-    #         'likelihood_imbalance': (-6, 1),
-    #         'generated_loss_imbalance': (-6, 1),
-    #
-    #     }
-    # )
-    # BO.maximize()
-    # print(BO.max)
+    test_test('modify_proposed_train_3_3_不添加sigmoid_likelihood_HF_sigmoid时间参数.txt')
+    BO = BayesianOptimization(
+        train, {
+            'hidden_size': (5, 8),
+            'z_dims': (5, 8),
+            'n_disc': (1, 10),
+            'learning_rate': (-5, 1),
+            'l2_regularization': (-5, 1),
+            'kl_imbalance':  (-6, 1),
+            'reconstruction_mse_imbalance': (-6, 1),
+            'generated_mse_imbalance': (-6, 1),
+            'likelihood_imbalance': (-6, 1),
+            'generated_loss_imbalance': (-6, 1),
 
-    mse_all = []
-    r_value_all = []
-    mae_all = []
-    for i in range(50):
-        mse, mae, r_value = train(hidden_size=64,
-                                  z_dims=32,
-                                  learning_rate=0.001012490319953338,
-                                  l2_regularization=2.773391936440317e-05,
-                                  n_disc=3,
-                                  generated_mse_imbalance=0.01075599753491925,
-                                  generated_loss_imbalance=0.007147262162673503,
-                                  kl_imbalance=8.60125034952951,
-                                  reconstruction_mse_imbalance=0.6532065444406749,
-                                  likelihood_imbalance=2.273264554389181)
-        mse_all.append(mse)
-        r_value_all.append(r_value)
-        mae_all.append(mae)
-        print("epoch---{}---r_value_ave  {}  mse_all_ave {}  mae_all_ave  {}  "
-              "r_value_std {}----mse_all_std  {}  mae_std {}".
-              format(i, np.mean(r_value_all), np.mean(mse_all), np.mean(mae_all),
-                     np.std(r_value_all), np.std(mse_all), np.std(mae_all)))
+        }
+    )
+    BO.maximize()
+    print(BO.max)
+
+    # mse_all = []
+    # r_value_all = []
+    # mae_all = []
+    # for i in range(50):
+    #     mse, mae, r_value = train(hidden_size=64,
+    #                               z_dims=32,
+    #                               learning_rate=0.001012490319953338,
+    #                               l2_regularization=2.773391936440317e-05,
+    #                               n_disc=3,
+    #                               generated_mse_imbalance=0.01075599753491925,
+    #                               generated_loss_imbalance=0.007147262162673503,
+    #                               kl_imbalance=8.60125034952951,
+    #                               reconstruction_mse_imbalance=0.6532065444406749,
+    #                               likelihood_imbalance=2.273264554389181)
+    #     mse_all.append(mse)
+    #     r_value_all.append(r_value)
+    #     mae_all.append(mae)
+    #     print("epoch---{}---r_value_ave  {}  mse_all_ave {}  mae_all_ave  {}  "
+    #           "r_value_std {}----mse_all_std  {}  mae_std {}".
+    #           format(i, np.mean(r_value_all), np.mean(mse_all), np.mean(mae_all),
+    #                  np.std(r_value_all), np.std(mse_all), np.std(mae_all)))
 
 
 

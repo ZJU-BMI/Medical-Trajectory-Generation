@@ -196,9 +196,9 @@ class HawkesProcess(Model):
         input_t, current_time_index_shape = input_x
         current_time_index = tf.shape(current_time_index_shape)[0]
         batch = tf.shape(input_t)[0]
-        trigger_alpha = tf.tile(self.trigger_parameter_alpha, [batch, 1])
-        trigger_beta = tf.tile(self.trigger_parameter_beta, [batch, 1])
-        base_intensity = tf.tile(self.base_intensity, [batch, 1])
+        trigger_alpha = tf.tile(tf.keras.activations.sigmoid(self.trigger_parameter_alpha), [batch, 1])
+        trigger_beta = tf.tile(tf.keras.activations.sigmoid(self.trigger_parameter_beta), [batch, 1])
+        base_intensity = tf.tile(tf.keras.activations.sigmoid(self.base_intensity), [batch, 1])
 
         condition_intensity = self.calculate_lambda_process(input_t, current_time_index,
                                                             trigger_alpha, trigger_beta, base_intensity)
@@ -447,132 +447,13 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
                                                                                       np.mean(r_value_all),
                                                                                       count))
 
-        # if mse_generated_test < 0.008 and train_set.epoch_completed > 40:
-        #     checkpoint_encode_share = tf.train.Checkpoint(encode_share=encode_share)
-        #     path = './model/encoder_share/' + str(train_set.epoch_completed) + '.ckpt'
-        #     path_encoder = checkpoint_encode_share.save(path)
-        #     print(path_encoder)
-        #
-        #     checkpoint_decode_share = tf.train.Checkpoint(decoder_share=decoder_share)
-        #     path = './model/decoder_share/' + str(train_set.epoch_completed) + '.ckpt'
-        #     path_decoder = checkpoint_decode_share.save(path)
-        #     print(path_decoder)
-        #
-        #     checkpoint_post = tf.train.Checkpoint(post_net=post_net)
-        #     path = './model/checkpoint_post/' + str(train_set.epoch_completed) + '.ckpt'
-        #     path_post = checkpoint_post.save(path)
-        #     print(path_post)
-        #
-        #     checkpoint_prior = tf.train.Checkpoint(prior_net=prior_net)
-        #     path = './model/checkpoint_prior/' + str(train_set.epoch_completed) + '.ckpt'
-        #     path_prior = checkpoint_prior.save(path)
-        #     print(path_prior)
-        #
-        #     checkpoint_hawkes = tf.train.Checkpoint(hawkes_process=hawkes_process)
-        #     path = './model/checkpoint_hawkes/' + str(train_set.epoch_completed) + '.ckpt'
-        #     path_hawkes = checkpoint_hawkes.save(path)
-        #     print(path_hawkes)
-
     tf.compat.v1.reset_default_graph()
     return mse_generated_test, mae_generated_test, np.mean(r_value_all)
     # return -1 * mse_generated_test
 
 
-def test():
-
-    train_set = np.load("../../Trajectory_generate/dataset_file/train_x_.npy").reshape(-1, 6, 60)
-    # test_set = np.load("../../Trajectory_generate/dataset_file/test_x.npy").reshape(-1, 6, 60)
-    test_set = np.load("../../Trajectory_generate/dataset_file/validate_x_.npy").reshape(-1, 6, 60)
-
-    previous_visit = 3
-    predicted_visit = 3
-
-    feature_dims = train_set.shape[2] - 1
-
-    train_set = DataSet(train_set)
-    train_set.epoch_completed = 0
-
-    hidden_size = 64
-    z_dims = 64
-
-    encode_share = Encoder(hidden_size=hidden_size)
-    decoder_share = Decoder(hidden_size=hidden_size, feature_dims=feature_dims)
-    prior_net = Prior(z_dims=z_dims)
-    post_net = Post(z_dims=z_dims)
-    hawkes_process = HawkesProcess()
-
-    checkpoint_encode_share = tf.train.Checkpoint(encode_share=encode_share)
-    checkpoint_encode_share.restore(tf.train.latest_checkpoint('./model/encoder_share/46.ckpt'))
-
-    checkpoint_decode_share = tf.train.Checkpoint(decoder_share=decoder_share)
-    checkpoint_decode_share.restore(tf.train.latest_checkpoint('./model/decoder_share/46.ckpt'))
-
-    checkpoint_post = tf.train.Checkpoint(post_net=post_net)
-    checkpoint_post.restore(tf.train.latest_checkpoint('./model/checkpoint_post/46.ckpt'))
-
-    checkpoint_prior = tf.train.Checkpoint(prior_net=prior_net)
-    checkpoint_prior.restore(tf.train.latest_checkpoint('./model/checkpoint_prior/46.ckpt'))
-
-    checkpoint_hawkes = tf.train.Checkpoint(hawkes_process=hawkes_process)
-    checkpoint_hawkes.restore(tf.train.latest_checkpoint('./model/checkpoint_hawkes/46.ckpt'))
-
-    input_x_test = tf.cast(test_set[:, :, 1:], tf.float32)
-    input_t_test = tf.cast(test_set[:, :, 0], tf.float32)
-    batch_test = input_x_test.shape[0]
-    generated_trajectory_test = tf.zeros(shape=[batch_test, 0, feature_dims])
-    for predicted_visit_ in range(predicted_visit):
-        for previous_visit_ in range(previous_visit + predicted_visit_):
-            sequence_time_test = input_x_test[:, previous_visit_, :]
-            if previous_visit_ == 0:
-                encode_c_test = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
-                encode_h_test = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
-            encode_c_test, encode_h_test = encode_share([sequence_time_test, encode_c_test, encode_h_test])
-
-        if predicted_visit_ != 0:
-            for i in range(predicted_visit_):
-                sequence_input_t = generated_trajectory_test[:, i, :]
-                encode_c_test, encode_h_test = encode_share([sequence_input_t, encode_c_test, encode_h_test])
-
-        context_state_test = encode_h_test
-        z_prior_test, z_mean_prior_test, z_log_var_prior = prior_net(context_state_test)
-
-        if predicted_visit_ == 0:
-            decode_c_generate_test = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
-            decode_h_generate_test = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
-            sequence_last_time_test = input_x_test[:, predicted_visit_ + previous_visit, :]
-
-        current_time_index_shape_test = tf.ones(shape=[previous_visit + predicted_visit_])
-
-        condition_intensity_test, likelihood_test = hawkes_process([input_t_test, current_time_index_shape_test])
-
-        sequence_next_visit_test, decode_c_generate_test, decode_h_generate_test = decoder_share([z_prior_test, context_state_test, sequence_last_time_test, decode_c_generate_test, decode_h_generate_test * condition_intensity_test])
-        sequence_last_time_test = sequence_next_visit_test
-        sequence_next_visit_test = tf.reshape(sequence_last_time_test, [batch_test, -1, feature_dims])
-
-        generated_trajectory_test = tf.concat((generated_trajectory_test, sequence_next_visit_test), axis=1)
-
-    mse_generated_test = tf.reduce_mean(
-        tf.keras.losses.mse(input_x_test[:, previous_visit:previous_visit + predicted_visit, :],
-                            generated_trajectory_test))
-    mae_generated_test = tf.reduce_mean(
-        tf.keras.losses.mae(input_x_test[:, previous_visit:previous_visit + predicted_visit, :],
-                            generated_trajectory_test))
-
-    r_value_all = []
-    p_value_all = []
-
-    for r in range(predicted_visit):
-        x_ = tf.reshape(input_x_test[:, previous_visit + r, :], (-1,))
-        y_ = tf.reshape(generated_trajectory_test[:, r, :], (-1,))
-        r_value_ = stats.pearsonr(x_, y_)
-        r_value_all.append(r_value_[0])
-        p_value_all.append(r_value_[1])
-
-    return mse_generated_test, mae_generated_test, np.mean(r_value_all)
-
-
 if __name__ == '__main__':
-    test_test('VAE_Hawkes_sigmoid_HF_test__3_3_重新训练_8_7_修改解码器输入.txt')
+    test_test('VAE_Hawkes_sigmoid_HF_test__3_3_修改解码器_时间参数大于0.txt')
 
     # Encode_Decode_Time_BO = BayesianOptimization(
     #     train, {
@@ -593,14 +474,14 @@ if __name__ == '__main__':
     r_value_all = []
     mae_all = []
     for i in range(50):
-        mse, mae, r_value = train(hidden_size=64,
-                                  learning_rate=0.0064155641701513205,
-                                  l2_regularization=1.274353936947241e-5,
+        mse, mae, r_value = train(hidden_size=32,
+                                  learning_rate=0.007374369907065337,
+                                  l2_regularization=1e-5,
                                   z_dims=128,
-                                  kl_imbalance=0.01000828377541689,
-                                  generated_mse_imbalance=9.12130343290256e-5 ,
-                                  reconstruction_imbalance=0.004736464537618645,
-                                  likelihood_imbalance=10 **(-2.4506935847825364))
+                                  kl_imbalance=8.254885151295555e-6,
+                                  generated_mse_imbalance=0.24178873322616626,
+                                  reconstruction_imbalance=0.590691186691032,
+                                  likelihood_imbalance=10 **(-3.534136468557273))
         mse_all.append(mse)
         r_value_all.append(r_value)
         mae_all.append(mae)
@@ -609,18 +490,6 @@ if __name__ == '__main__':
               format(i, np.mean(r_value_all), np.mean(mse_all), np.mean(mae_all),
                      np.std(r_value_all), np.std(mse_all),np.std(mae_all)))
 
-    # mse_all = []
-    # mae_all = []
-    # r_value_all = []
-    # for i in range(50):
-    #     mse, mae, r_value = test()
-    #     mse_all.append(mse)
-    #     mae_all.append(mae)
-    #     r_value_all.append(r_value)
-    #     print("epoch---{}---r_value_ave  {}  mse_all_ave {}  mae_all_ave  {}  "
-    #           "r_value_std {}----mse_all_std  {}  mae_std {}".
-    #           format(i, np.mean(r_value_all), np.mean(mse_all), np.mean(mae_all),
-    #                  np.std(r_value_all), np.std(mse_all), np.std(mae_all)))
 
 
 

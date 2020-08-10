@@ -25,7 +25,7 @@ class Decoder(Model):
         self.LSTM_Cell_decode = tf.keras.layers.LSTMCell(hidden_size)
         self.dense1 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
         self.dense2 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
-        self.dense3 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
+        self.dense3 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.sigmoid)
 
     def call(self, input_x):
         decode_input, decode_c, decode_h = input_x
@@ -131,7 +131,7 @@ class RMTPP(Model):
         inputs = tf.concat((feature, time), axis=1)
         state = [c_i_1, h_i_1]
         output, state = self.LSTM_Cell_decode(inputs, state)
-        output = tf.where(output > 0, output, tf.zeros_like(output))
+        # output = tf.where(output > 0, output, tf.zeros_like(output))
         past_influence = self.dense1(output)
         log_f_i_1 = past_influence + self.weight_w * target_interval + (tf.math.exp(past_influence) -
                                                                         tf.math.exp(past_influence +
@@ -225,7 +225,7 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
                         encode_h = tf.Variable(tf.zeros(shape=[batch, hidden_size]))
 
                     target_time_interval = input_t_train[:, previous_visit_ + 1, :] - input_t_train[:, previous_visit_, :]  # 预测的时间和当前时间的差值
-                    encode_c, encode_h, log_f_next_time = time_process([sequence_time, time_time, encode_c, encode_h, target_time_interval])
+                    encode_c, encode_h, log_f_next_time = time_process([sequence_time, tf.nn.sigmoid(time_time), encode_c, encode_h, target_time_interval])
                 context_state = encode_h
 
                 if predicted_visit_ == 0:
@@ -238,7 +238,7 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
                 probability_likelihood = tf.concat((probability_likelihood, tf.reshape(log_f_next_time, [-1, 1, 1])), axis=1)
                 z_prior, z_mean_prior, z_log_var_prior = prior_net(context_state)
 
-                encode_c_next, encode_h_next, _ = time_process([sequence_time_current_time, time_time_current_time, encode_c, encode_h, target_time_interval_next])
+                encode_c_next, encode_h_next, _ = time_process([sequence_time_current_time, tf.nn.sigmoid(time_time_current_time), encode_c, encode_h, target_time_interval_next])
                 z_post, z_mean_post, z_log_var_post = post_net([context_state, encode_h])
 
                 generated_next_visit, decode_c_generate, decode_h_generate = decoder_share([z_prior, decode_c_generate, decode_h_generate])
@@ -325,14 +325,14 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
                             encode_c_test = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
                             encode_h_test = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
                         target_time_interval_test = input_t_test[:, previous_visit_ + 1, :] - input_t_test[:, previous_visit_, :]  # 预测的时间和当前时间的差值
-                        encode_c_test, encode_h_test, log_f_next_time = time_process([sequence_time_test, time_time_test, encode_c_test, encode_h_test, target_time_interval_test])
+                        encode_c_test, encode_h_test, log_f_next_time = time_process([sequence_time_test, tf.nn.sigmoid(time_time_test), encode_c_test, encode_h_test, target_time_interval_test])
 
                     if predicted_visit_ != 0:
                         for i in range(predicted_visit_):
                             sequence_input_x_next = generated_trajectory_test[:, i, :]
                             sequence_input_t_next = input_t_test[:, previous_visit+predicted_visit_, :]
                             target_time_interval_next = input_t_test[:, previous_visit+predicted_visit_+1,:]- sequence_input_t_next
-                            encode_c_test, encode_h_test, log_f_next_time = time_process([sequence_input_x_next, sequence_input_t_next, encode_c_test, encode_h_test, target_time_interval_next])
+                            encode_c_test, encode_h_test, log_f_next_time = time_process([sequence_input_x_next, tf.nn.sigmoid(sequence_input_t_next), encode_c_test, encode_h_test, target_time_interval_next])
 
                     context_state_test = encode_h_test
                     z_prior_test, z_mean_prior_test, z_log_var_prior = prior_net(context_state_test)
