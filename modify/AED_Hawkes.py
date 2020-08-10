@@ -16,12 +16,16 @@ for gpu in gpus:
 
 
 def train(hidden_size, l2_regularization, learning_rate, generated_imbalance, likelihood_imbalance):
-    train_set = np.load("../../Trajectory_generate/dataset_file/train_x_.npy").reshape(-1, 6, 60)
-    test_set = np.load("../../Trajectory_generate/dataset_file/test_x.npy").reshape(-1, 6, 60)
-    # test_set = np.load("../../Trajectory_generate/dataset_file/validate_x_.npy").reshape(-1, 6, 60)
+    train_set = np.load("../../Trajectory_generate/dataset_file/HF_train_.npy").reshape(-1, 6, 30)
+    test_set = np.load("../../Trajectory_generate/dataset_file/HF_test_.npy").reshape(-1, 6, 30)
+    # test_set = np.load("../../Trajectory_generate/dataset_file/HF_validate_.npy").reshape(-1, 6, 30)
 
-    previous_visit = 3
-    predicted_visit = 3
+    # train_set = np.load("../../Trajectory_generate/dataset_file/mimic_train_x_.npy").reshape(-1, 6, 37)
+    # test_set = np.load("../../Trajectory_generate/dataset_file/mimic_test_x_.npy").reshape(-1, 6, 37)
+    # test_set = np.load("../../Trajectory_generate/dataset_file/mimic_validate_.npy").reshape(-1, 6, 37)
+
+    previous_visit = 1
+    predicted_visit = 5
 
     feature_dims = train_set.shape[2] - 1
 
@@ -35,6 +39,8 @@ def train(hidden_size, l2_regularization, learning_rate, generated_imbalance, li
     # l2_regularization = 10 ** l2_regularization
     # generated_imbalance = 10 ** generated_imbalance
     # likelihood_imbalance = 10 ** likelihood_imbalance
+
+    print('previous_visit---{}---predicted_visit----{}-'.format(previous_visit, predicted_visit))
 
     print('hidden_size----{}---'
           'l2_regularization---{}---'
@@ -185,7 +191,7 @@ def train(hidden_size, l2_regularization, learning_rate, generated_imbalance, li
 
 
 if __name__ == '__main__':
-    test_test('AED_Hawkes_青光眼_test_3_3_7_18.txt')
+    test_test('AED_Hawkes_HF_test__重新训练_1_5_7_25.txt')
     # Encode_Decode_Time_BO = BayesianOptimization(
     #     train, {
     #         'hidden_size': (5, 8),
@@ -202,11 +208,11 @@ if __name__ == '__main__':
     r_value_all = []
     mae_all = []
     for i in range(50):
-        mse, mae, r_value = train(hidden_size=128,
-                                  learning_rate=0.008823066301767246,
-                                  l2_regularization=3.017286348529315e-05,
-                                  generated_imbalance=0.47383867868002144,
-                                  likelihood_imbalance=0.0030426563595897745)
+        mse, mae, r_value = train(hidden_size=256,
+                                  learning_rate=0.027798965243033574,
+                                  l2_regularization=1e-5,
+                                  generated_imbalance=1.7701146620177461,
+                                  likelihood_imbalance=10.0)
         mse_all.append(mse)
         r_value_all.append(r_value)
         mae_all.append(mae)

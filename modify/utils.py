@@ -145,3 +145,39 @@ def test_test(name):
     print(path)
     print(os.path.dirname(__file__))
     print('------------------')
+
+
+def split_dataset(dataset, k):
+    train_set = [0] * k
+    validate_set = [0] * k
+    num_each_validate = int(dataset.shape[0] / k)
+
+    for i in range(k):
+        if i != k-1 and i != 0:
+            validate_set[i] = dataset[i*num_each_validate:(i+1)*num_each_validate, :, :]
+            train_set[i] = np.concatenate((dataset[:i*num_each_validate, :, :, ], dataset[(i+1)*num_each_validate:, :, :]), axis=0)
+
+        if i == 0:
+            validate_set[i] = dataset[:num_each_validate, :, :]
+            train_set[i] = dataset[num_each_validate:, :, :]
+
+        if i == k-1:
+            validate_set[i] = dataset[(k-1)*num_each_validate:, :, :]
+            train_set[i] = dataset[:(k-1)*num_each_validate, :, :]
+
+    return train_set, validate_set
+
+
+if __name__== '__main__':
+    train_set = np.load('../../Trajectory_generate/dataset_file/HF_train_.npy').reshape(-1, 6, 30)
+    test_set = np.load('../../Trajectory_generate/dataset_file/HF_validate_.npy').reshape(-1, 6, 30)
+    dataset = np.concatenate((train_set, test_set), axis=0)
+    k = 5
+    train_set, validate_set = split_dataset(dataset, k)
+    for i in range(k):
+        print(train_set[k].shape)
+        print(validate_set[k].shape)
+
+
+
+

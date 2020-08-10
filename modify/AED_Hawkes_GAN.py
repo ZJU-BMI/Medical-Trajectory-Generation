@@ -9,12 +9,20 @@ from ProposedModel import Discriminator
 
 
 def train(hidden_size, learning_rate, l2_regularization, n_disc, generated_mse_imbalance, generated_loss_imbalance, likelihood_imbalance):
-    train_set = np.load("../../Trajectory_generate/dataset_file/train_x_.npy").reshape(-1, 6, 60)
-    test_set = np.load("../../Trajectory_generate/dataset_file/test_x.npy").reshape(-1, 6, 60)
+    # train_set = np.load("../../Trajectory_generate/dataset_file/train_x_.npy").reshape(-1, 6, 60)
+    # test_set = np.load("../../Trajectory_generate/dataset_file/test_x.npy").reshape(-1, 6, 60)
     # test_set = np.load("../../Trajectory_generate/dataset_file/validate_x_.npy").reshape(-1, 6, 60)
 
-    previous_visit = 3
-    predicted_visit = 3
+    train_set = np.load('../../Trajectory_generate/dataset_file/HF_train_.npy').reshape(-1, 6, 30)
+    test_set = np.load('../../Trajectory_generate/dataset_file/HF_validate_.npy').reshape(-1, 6, 30)
+    # test_set = np.load('../../Trajectory_generate/dataset_file/HF_test_.npy').reshape(-1, 6, 30)
+
+    # train_set = np.load("../../Trajectory_generate/dataset_file/mimic_train_x_.npy").reshape(-1, 6, 37)
+    # test_set = np.load("../../Trajectory_generate/dataset_file/mimic_test_x_.npy").reshape(-1, 6, 37)
+    # test_set = np.load("../../Trajectory_generate/dataset_file/mimic_validate_.npy").reshape(-1, 6, 37)
+
+    previous_visit = 1
+    predicted_visit = 5
 
     feature_dims = train_set.shape[2] - 1
 
@@ -23,13 +31,15 @@ def train(hidden_size, learning_rate, l2_regularization, n_disc, generated_mse_i
     batch_size = 64
     epochs = 50
 
-    # hidden_size = 2 ** (int(hidden_size))
-    # learning_rate = 10 ** learning_rate
-    # l2_regularization = 10 ** l2_regularization
-    # n_disc= int(n_disc)
-    # generated_mse_imbalance = 10 ** generated_mse_imbalance
-    # generated_loss_imbalance = 10 ** generated_loss_imbalance
-    # likelihood_imbalance = 10 ** likelihood_imbalance
+    hidden_size = 2 ** (int(hidden_size))
+    learning_rate = 10 ** learning_rate
+    l2_regularization = 10 ** l2_regularization
+    n_disc = int(n_disc)
+    generated_mse_imbalance = 10 ** generated_mse_imbalance
+    generated_loss_imbalance = 10 ** generated_loss_imbalance
+    likelihood_imbalance = 10 ** likelihood_imbalance
+
+    print('previous_visit---{}---predicted_visit----{}-'.format(previous_visit, predicted_visit))
 
     print('hidden_size---{}---learning_rate---{}---l2_regularization---{}---n_disc---{}'
           'generated_mse_imbalance---{}---generated_loss_imbalance---{}---'
@@ -177,7 +187,7 @@ def train(hidden_size, learning_rate, l2_regularization, n_disc, generated_mse_i
             for r in range(predicted_visit):
                 x_ = tf.reshape(input_x_test[:, previous_visit + r, :], (-1,))
                 y_ = tf.reshape(generated_trajectory_test[:, r, :], (-1,))
-                if y_.numpy().all() == np.zeros_like(y_).all():
+                if (y_.numpy() == np.zeros_like(y_)).all():
                     r_value_ = [0.0, 0.0]
                 else:
                     r_value_ = stats.pearsonr(x_, y_)
@@ -191,44 +201,44 @@ def train(hidden_size, learning_rate, l2_regularization, n_disc, generated_mse_i
                                                           np.mean(r_value_all), count))
 
     tf.compat.v1.reset_default_graph()
-    return mse_generated_test, mae_generated_test, np.mean(r_value_all)
-    # return -1 * mse_generated_test
+    # return mse_generated_test, mae_generated_test, np.mean(r_value_all)
+    return -1 * mse_generated_test
 
 
 if __name__ == '__main__':
-    test_test('AED_Hawkes_GAN_青光眼_test_3_3_7_20.txt')
-    # BO = BayesianOptimization(
-    #     train, {
-    #         'hidden_size': (5, 8),
-    #         'n_disc': (1, 10),
-    #         'learning_rate': (-5, 1),
-    #         'l2_regularization': (-5, 1),
-    #         'generated_mse_imbalance': (-6, 1),
-    #         'likelihood_imbalance': (-6, 1),
-    #         'generated_loss_imbalance': (-6, 1),
-    #
-    #     }
-    # )
-    # BO.maximize()
-    # print(BO.max)
-    mse_all = []
-    r_value_all = []
-    mae_all = []
-    for i in range(50):
-        mse, mae, r_value = train(hidden_size=64,
-                                  learning_rate=0.010762961272936253,
-                                  l2_regularization=0.00010987535740337004,
-                                  n_disc=1,
-                                  generated_mse_imbalance=1.576646311563662e-06,
-                                  generated_loss_imbalance=0.0019191745593759443,
-                                  likelihood_imbalance=0.09102770142909558)
-        mse_all.append(mse)
-        r_value_all.append(r_value)
-        mae_all.append(mae)
-        print("epoch---{}---r_value_ave  {}  mse_all_ave {}  mae_all_ave  {}  "
-              "r_value_std {}----mse_all_std  {}  mae_std {}".
-              format(i, np.mean(r_value_all), np.mean(mse_all), np.mean(mae_all),
-                     np.std(r_value_all), np.std(mse_all), np.std(mae_all)))
+    test_test('AED_Hawkes_GAN_HF_test__1_5_重新训练_7_25.txt')
+    BO = BayesianOptimization(
+        train, {
+            'hidden_size': (5, 8),
+            'n_disc': (1, 10),
+            'learning_rate': (-5, 1),
+            'l2_regularization': (-5, 1),
+            'generated_mse_imbalance': (-6, 1),
+            'likelihood_imbalance': (-6, 1),
+            'generated_loss_imbalance': (-6, 1),
+
+        }
+    )
+    BO.maximize()
+    print(BO.max)
+    # mse_all = []
+    # r_value_all = []
+    # mae_all = []
+    # for i in range(50):
+    #     mse, mae, r_value = train(hidden_size=128,
+    #                               learning_rate=0.004481554158981572,
+    #                               l2_regularization=0.0063829369825288244,
+    #                               n_disc=3,
+    #                               generated_mse_imbalance=1.9699616185956445e-05,
+    #                               generated_loss_imbalance=0.061039544920758,
+    #                               likelihood_imbalance=0.018446327803507835)
+    #     mse_all.append(mse)
+    #     r_value_all.append(r_value)
+    #     mae_all.append(mae)
+    #     print("epoch---{}---r_value_ave  {}  mse_all_ave {}  mae_all_ave  {}  "
+    #           "r_value_std {}----mse_all_std  {}  mae_std {}".
+    #           format(i, np.mean(r_value_all), np.mean(mse_all), np.mean(mae_all),
+    #                  np.std(r_value_all), np.std(mse_all), np.std(mae_all)))
 
 
 

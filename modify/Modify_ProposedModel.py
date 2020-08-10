@@ -4,7 +4,7 @@ from data import DataSet
 import os
 import warnings
 from tensorflow_core.python.keras.models import Model
-from test import Post, Prior, HawkesProcess, Encoder, Decoder, test_test
+from test import Post, Prior, HawkesProcess, Encoder, test_test
 from scipy import stats
 from bayes_opt import BayesianOptimization
 
@@ -91,21 +91,67 @@ class Discriminator(Model):
         return trajectory_real_predict, trajectory_fake_predict
 
 
-def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generated_mse_imbalance, generated_loss_imbalance, kl_imbalance, reconstruction_mse_imbalance, likelihood_imbalance):
-    # train_set = np.load("../../Trajectory_generate/dataset_file/train_x_.npy").reshape(-1, 6, 60)
-    # test_set = np.load("../../Trajectory_generate/dataset_file/test_x.npy").reshape(-1, 6, 60)
-    # test_set = np.load("../../Trajectory_generate/dataset_file/validate_x_.npy").reshape(-1, 6, 60)
+class Prior(Model):
+    def __init__(self, z_dims):
+        super().__init__(name='prior_net')
+        self.z_dims = z_dims
+        self.dense1 = tf.keras.layers.Dense(z_dims)
+        self.dense2 = tf.keras.layers.Dense(z_dims)
+        self.dense3 = tf.keras.layers.Dense(z_dims, activation=tf.nn.sigmoid)  # obtain z hidden
+        # obtain z_mean, z_log_var
+        self.dense4 = tf.keras.layers.Dense(z_dims, activation=tf.nn.sigmoid)
+        self.dense5 = tf.keras.layers.Dense(z_dims, activation=tf.nn.sigmoid)
 
+    def call(self, input_x):
+        hidden_1 = self.dense1(input_x)
+        hidden_2 = self.dense2(hidden_1)
+        hidden_3 = self.dense3(hidden_2)
+
+        z_mean = self.dense4(hidden_3)
+        z_log_var = self.dense5(hidden_3)
+
+        z = self.reparameterize(z_mean, z_log_var, self.z_dims)
+
+        return z, z_mean, z_log_var
+
+    def reparameterize(self, mu, log_var, z_dims):
+        batch = tf.shape(mu)[0]
+        sample_all = tf.zeros(shape=(batch, 0))
+        for feature in range(z_dims):
+            sample = tf.compat.v1.random_normal(shape=(batch, 1), seed=1)
+            sample_all = tf.concat((sample_all, sample), axis=1)
+        z = mu + tf.multiply(sample_all, tf.math.sqrt(tf.exp(log_var)))
+        return z
+
+
+# 输入z_i_1, 输出解码x_i_1
+class Decoder(Model):
+    def __init__(self, hidden_size, feature_dims):
+        super().__init__(name='decode_share')
+        self.hidden_size = hidden_size
+        self.feature_dims = feature_dims
+        self.LSTM_Cell_decode = tf.keras.layers.LSTMCell(hidden_size)
+        self.dense1 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
+        self.dense2 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
+        self.dense3 = tf.keras.layers.Dense(units=feature_dims, activation=tf.nn.relu)
+
+    def call(self, input_x):
+        decode_input, decode_c, decode_h = input_x
+        state = [decode_c, decode_h]
+        output, state = self.LSTM_Cell_decode(decode_input, state)
+        y_1 = self.dense1(output)
+        y_2 = self.dense2(y_1)
+        y_3 = self.dense3(y_2)
+        return y_3, state[0], state[1]
+
+
+def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generated_mse_imbalance, generated_loss_imbalance, kl_imbalance, reconstruction_mse_imbalance, likelihood_imbalance):
     train_set = np.load('../../Trajectory_generate/dataset_file/HF_train_.npy').reshape(-1, 6, 30)
     # test_set = np.load('../../Trajectory_generate/dataset_file/HF_validate_.npy').reshape(-1, 6, 30)
     test_set = np.load('../../Trajectory_generate/dataset_file/HF_test_.npy').reshape(-1, 6, 30)
 
-    # train_set = np.load("../../Trajectory_generate/dataset_file/mimic_train_x_.npy").reshape(-1, 6, 37)
-    # test_set = np.load("../../Trajectory_generate/dataset_file/mimic_test_x_.npy").reshape(-1, 6, 37)
-    # test_set = np.load("../../Trajectory_generate/dataset_file/mimic_validate_.npy").reshape(-1, 6, 37)
-
-    previous_visit = 1
-    predicted_visit = 5
+    previous_visit = 3
+    predicted_visit = 3
 
     feature_dims = train_set.shape[2] - 1
 
@@ -188,17 +234,18 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
                     decode_c_reconstruction = tf.Variable(tf.zeros(shape=[batch, hidden_size]))
                     decode_h_reconstruction = tf.Variable(tf.zeros(shape=[batch, hidden_size]))
 
-                z_post, z_mean_post, z_log_var_post = post_net([context_state, encode_h])
-                z_prior, z_mean_prior, z_log_var_prior = prior_net(context_state)
-
                 current_time_index_shape = tf.ones(shape=[previous_visit+predicted_visit_])
                 condition_value, likelihood = hawkes_process([input_t_train, current_time_index_shape])
                 probability_likelihood = tf.concat((probability_likelihood, tf.reshape(likelihood, [batch, -1, 1])), axis=1)
-                probability_likelihood = tf.keras.activations.sigmoid(probability_likelihood)
+                # probability_likelihood = tf.keras.activations.sigmoid(probability_likelihood)
+
+                z_post, z_mean_post, z_log_var_post = post_net([context_state*condition_value, encode_h])
+                z_prior, z_mean_prior, z_log_var_prior = prior_net(context_state*condition_value)
+
                 # generation
-                generated_next_visit, decode_c_generate, decode_h_generate = decoder_share([z_prior, context_state, sequence_last_time, decode_c_generate, decode_h_generate*condition_value])
+                generated_next_visit, decode_c_generate, decode_h_generate = decoder_share([z_prior, decode_c_generate, decode_h_generate]) # 生成部分，按理说这部分是不需要的
                 # reconstruction
-                reconstructed_next_visit, decode_c_reconstruction, decode_h_reconstruction = decoder_share([z_post, context_state, sequence_last_time, decode_c_reconstruction, decode_h_reconstruction*condition_value])
+                reconstructed_next_visit, decode_c_reconstruction, decode_h_reconstruction = decoder_share([z_post, decode_c_reconstruction, decode_h_reconstruction]) # 重建过程，根据后验产生x_i_1
 
                 reconstructed_trajectory = tf.concat((reconstructed_trajectory, tf.reshape(reconstructed_next_visit, [batch, -1, feature_dims])), axis=1)
                 generated_trajectory = tf.concat((generated_trajectory, tf.reshape(generated_next_visit, [batch, -1, feature_dims])), axis=1)
@@ -233,10 +280,9 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
 
             likelihood_loss = tf.reduce_mean(probability_likelihood)
 
-            loss += generated_mse_loss * generated_mse_imbalance +\
-                    reconstructed_mse_loss * reconstruction_mse_imbalance + \
+            loss += reconstructed_mse_loss * reconstruction_mse_imbalance + \
                     kl_loss * kl_imbalance + likelihood_loss * likelihood_imbalance \
-                    + gen_loss * generated_loss_imbalance
+                    + gen_loss * 0
 
             for weight in discriminator.trainable_variables:
                 d_loss += tf.keras.regularizers.l2(l2_regularization)(weight)
@@ -288,10 +334,16 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
 
             input_x_test = tf.cast(test_set[:, :, 1:], tf.float32)
             input_t_test = tf.cast(test_set[:, :, 0], tf.float32)
+            one_year_time = np.load('../../Trajectory_generate/resource/HF_1_year__time.npy')
+            two_year_time = np.load('../../Trajectory_generate/resource/HF_2_year_time.npy')
+            three_month_time = np.load('../../Trajectory_generate/resource/HF_3_month_time.npy')
 
             batch_test = test_set.shape[0]
             generated_trajectory_test = tf.zeros(shape=[batch_test, 0, feature_dims])
-            for predicted_visit_ in range(predicted_visit):
+            generated_trajectory_test_3_month = tf.zeros(shape=[batch_test, 0, feature_dims])
+            generated_trajectory_test_one_year = tf.zeros(shape=[batch_test, 0, feature_dims])
+            generated_trajectory_test_two_year = tf.zeros(shape=[batch_test, 0, feature_dims])
+            for predicted_visit_ in range(predicted_visit):  # 测试过程
                 for previous_visit_ in range(previous_visit):
                     sequence_time_test = input_x_test[:, previous_visit_, :]
                     if previous_visit_ == 0:
@@ -304,26 +356,64 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
                     for i in range(predicted_visit_):
                         encode_c_test, encode_h_test = encode_share([generated_trajectory_test[:, i, :], encode_c_test, encode_h_test])
 
-                context_state_test = encode_h_test
+                context_state_test = encode_h_test # h_i
 
                 if predicted_visit_ == 0:
                     decode_c_generate_test = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
                     decode_h_generate_test = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
-                    sequence_last_time_test = input_x_test[:, previous_visit+predicted_visit_-1, :]
 
-                z_prior_test, z_mean_prior_test, z_log_var_prior_test = prior_net(context_state_test)
-                current_time_index_shape_test = tf.ones([previous_visit+predicted_visit_])
+                    decode_c_generate_test_3_month = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
+                    decode_h_generate_test_3_month = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
+
+                    decode_c_generate_test_one_year = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
+                    decode_h_generate_test_one_year = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
+
+                    decode_c_generate_test_two_year = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
+                    decode_h_generate_test_two_year = tf.Variable(tf.zeros(shape=[batch_test, hidden_size]))
+
+                current_time_index_shape_test = tf.ones([previous_visit + predicted_visit_])
+                # 真实时间输入生成
                 intensity_value_test, likelihood_test = hawkes_process([input_t_test, current_time_index_shape_test])
-
-                generated_next_visit_test, decode_c_generate_test, decode_h_generate_test = decoder_share([z_prior_test, context_state_test, sequence_last_time_test, decode_c_generate_test, decode_h_generate_test*intensity_value_test])
+                z_prior_test, z_mean_prior_test, z_log_var_prior_test = prior_net(context_state_test*intensity_value_test)
+                generated_next_visit_test, decode_c_generate_test, decode_h_generate_test = decoder_share([z_prior_test, decode_c_generate_test, decode_h_generate_test])
                 generated_trajectory_test = tf.concat((generated_trajectory_test, tf.reshape(generated_next_visit_test, [batch_test, -1, feature_dims])), axis=1)
-                sequence_last_time_test = generated_next_visit_test
+
+                # 3个月时间输入生成
+                intensity_value_test_3_month, likelihood_test_3_month = hawkes_process([three_month_time, current_time_index_shape_test])
+                z_prior_test_3_month, z_mean_prior_test_3_month, z_log_var_prior_test_3_month = prior_net(context_state_test*intensity_value_test_3_month)
+                generated_next_visit_test_3_month, decode_c_generate_test_3_month, decode_h_generate_test_3_month = decoder_share([z_prior_test_3_month, decode_c_generate_test_3_month, decode_h_generate_test_3_month])
+                generated_trajectory_test_3_month = tf.concat((generated_trajectory_test_3_month, tf.reshape(generated_next_visit_test_3_month, [batch_test, -1, feature_dims])), axis=1)
+
+                # 1年时间输入生成
+                intensity_value_test_one_year, likelihood_test_one_year = hawkes_process([one_year_time, current_time_index_shape_test])
+                z_prior_test_one_year, z_mean_prior_test_one_year, z_log_var_prior_test_one_year = prior_net(context_state_test * intensity_value_test_one_year)
+                generated_next_visit_test_one_year, decode_c_generate_test_one_year, decode_h_generate_test_one_year = decoder_share([z_prior_test_one_year, decode_c_generate_test_one_year, decode_h_generate_test_one_year])
+                generated_trajectory_test_one_year = tf.concat((generated_trajectory_test_one_year, tf.reshape(generated_next_visit_test_one_year, [batch_test, -1, feature_dims])), axis=1)
+
+                # 2年时间输入
+                intensity_value_test_two_year, likelihood_test_two_year = hawkes_process([two_year_time, current_time_index_shape_test])
+                z_prior_test_two_year, z_mean_prior_test_two_year, z_log_var_prior_test_two_year = prior_net(context_state_test * intensity_value_test_two_year)
+                generated_next_visit_test_two_year, decode_c_generate_test_two_year, decode_h_generate_test_two_year = decoder_share([z_prior_test_two_year, decode_c_generate_test_two_year, decode_h_generate_test_two_year])
+                generated_trajectory_test_two_year = tf.concat((generated_trajectory_test_two_year, tf.reshape(generated_next_visit_test_two_year, [batch_test, -1, feature_dims])), axis=1)
 
             mse_generated_test = tf.reduce_mean(tf.keras.losses.mse(input_x_test[:, previous_visit:previous_visit+predicted_visit, :], generated_trajectory_test))
             mae_generated_test = tf.reduce_mean(tf.keras.losses.mae(input_x_test[:, previous_visit:previous_visit+predicted_visit, :], generated_trajectory_test))
 
+            mse_generated_test_3_month = tf.reduce_mean(tf.keras.losses.mse(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_3_month))
+            mae_generated_test_3_month = tf.reduce_mean(tf.keras.losses.mae(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_3_month))
+
+            mse_generated_test_one_year = tf.reduce_mean( tf.keras.losses.mse(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_one_year))
+            mae_generated_test_one_year = tf.reduce_mean(tf.keras.losses.mae(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_one_year))
+
+            mse_generated_test_two_year = tf.reduce_mean(tf.keras.losses.mse(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_two_year))
+            mae_generated_test_two_year= tf.reduce_mean(tf.keras.losses.mae(input_x_test[:, previous_visit:previous_visit + predicted_visit, :], generated_trajectory_test_two_year))
+
             r_value_all = []
             p_value_all = []
+            r_value_all_3_month = []
+            p_value_all_3_month = []
+            r_value_all_one_year = []
+            r_value_all_two_year = []
 
             for r in range(predicted_visit):
                 x_ = tf.reshape(input_x_test[:, previous_visit + r, :], (-1,))
@@ -335,6 +425,34 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
                 r_value_all.append(r_value_[0])
                 p_value_all.append(r_value_[1])
 
+            for r in range(predicted_visit):
+                x_ = tf.reshape(input_x_test[:, previous_visit + r, :], (-1,))
+                y_ = tf.reshape(generated_trajectory_test_3_month[:, r, :], (-1,))
+                if (y_.numpy() == np.zeros_like(y_)).all():
+                    r_value_ = [0.0, 0.0]
+                else:
+                    r_value_ = stats.pearsonr(x_, y_)
+                r_value_all_3_month.append(r_value_[0])
+                p_value_all_3_month.append(r_value_[1])
+
+            for r in range(predicted_visit):
+                x_ = tf.reshape(input_x_test[:, previous_visit + r, :], (-1,))
+                y_ = tf.reshape(generated_trajectory_test_one_year[:, r, :], (-1,))
+                if (y_.numpy() == np.zeros_like(y_)).all():
+                    r_value_ = [0.0, 0.0]
+                else:
+                    r_value_ = stats.pearsonr(x_, y_)
+                r_value_all_one_year.append(r_value_[0])
+
+            for r in range(predicted_visit):
+                x_ = tf.reshape(input_x_test[:, previous_visit + r, :], (-1,))
+                y_ = tf.reshape(generated_trajectory_test_two_year[:, r, :], (-1,))
+                if (y_.numpy() == np.zeros_like(y_)).all():
+                    r_value_ = [0.0, 0.0]
+                else:
+                    r_value_ = stats.pearsonr(x_, y_)
+                r_value_all_two_year.append(r_value_[0])
+
             print('epoch ---{}---train_mse_generated---{}---likelihood_loss{}---'
                   'train_mse_reconstruct---{}---train_kl---{}---'
                   'test_mse---{}---test_mae---{}---'
@@ -343,13 +461,32 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
                                                           mse_generated_test, mae_generated_test,
                                                           np.mean(r_value_all), count))
 
+            print('epoch---{}---| test_mse_real---{}--| test_mse_3_month---{}-|-test_mse_one_year---{}--|-test_mse_two_year---{}-|'
+                  'test_mae_real---{}--|---mae_3_month---{}-|-test_mae_one_year--{}--|-test_mae_two_year---{}--|-'
+                  'test_r_value_real---{}--|-test_r_value_3_month---{}--|-test_r_value_one_year---{}--|-test_r_value_two_year---{}|--'
+                  '---count--{}'.format(train_set.epoch_completed,
+                                        mse_generated_test,
+                                        mse_generated_test_3_month,
+                                        mse_generated_test_one_year,
+                                        mse_generated_test_two_year,
+                                        mae_generated_test,
+                                        mae_generated_test_3_month,
+                                        mae_generated_test_one_year,
+                                        mae_generated_test_two_year,
+                                        np.mean(r_value_all),
+                                        np.mean(r_value_all_3_month),
+                                        np.mean(r_value_all_one_year),
+                                        np.mean(r_value_all_two_year),
+                                        count
+                                        ))
+
     tf.compat.v1.reset_default_graph()
     return mse_generated_test, mae_generated_test, np.mean(r_value_all)
     # return -1 * mse_generated_test
 
 
 if __name__ == '__main__':
-    test_test('VAE_Hawkes_GAN_HF_test__1_5_重新训练_v2_7_26.txt')
+    test_test('modify_proposed_train_1_1_不添加sigmoid_likelihood_HF_时间对比.txt')
     # BO = BayesianOptimization(
     #     train, {
     #         'hidden_size': (5, 8),
@@ -372,16 +509,16 @@ if __name__ == '__main__':
     r_value_all = []
     mae_all = []
     for i in range(50):
-        mse, mae, r_value = train(hidden_size=128,
-                                  z_dims=128,
-                                  learning_rate=0.0010397694211860807,
-                                  l2_regularization=0.003599184693130434,
-                                  n_disc=7,
-                                  generated_mse_imbalance=0.0055042888323120435,
-                                  generated_loss_imbalance=0.04510469926631608,
-                                  kl_imbalance=0.2629980029801725,
-                                  reconstruction_mse_imbalance=1.9765371389973956e-6,
-                                  likelihood_imbalance=6.655767064468706e-5)
+        mse, mae, r_value = train(hidden_size=64,
+                                  z_dims=32,
+                                  learning_rate=0.001012490319953338,
+                                  l2_regularization=2.773391936440317e-05,
+                                  n_disc=3,
+                                  generated_mse_imbalance=0.01075599753491925,
+                                  generated_loss_imbalance=0.007147262162673503,
+                                  kl_imbalance=8.60125034952951,
+                                  reconstruction_mse_imbalance=0.6532065444406749,
+                                  likelihood_imbalance=2.273264554389181)
         mse_all.append(mse)
         r_value_all.append(r_value)
         mae_all.append(mae)
