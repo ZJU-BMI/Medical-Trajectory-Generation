@@ -152,8 +152,8 @@ def kl_loss(z_mean_post, log_var_post, z_mean_prior, log_var_prior):
 def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, reconstruction_imbalance, generated_mse_imbalance, likelihood_imbalance):
 
     train_set = np.load('../../Trajectory_generate/dataset_file/HF_train_.npy').reshape(-1, 6, 30)
-    test_set = np.load('../../Trajectory_generate/dataset_file/HF_validate_.npy').reshape(-1, 6, 30)
-    # test_set = np.load('../../Trajectory_generate/dataset_file/HF_test_.npy').reshape(-1, 6, 30)
+    # test_set = np.load('../../Trajectory_generate/dataset_file/HF_validate_.npy').reshape(-1, 6, 30)
+    test_set = np.load('../../Trajectory_generate/dataset_file/HF_test_.npy').reshape(-1, 6, 30)
 
     previous_visit = 3
     predicted_visit = 3
@@ -165,14 +165,14 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
     batch_size = 64
     epochs = 50
     #
-    hidden_size = 2 ** (int(hidden_size))
-    z_dims = 2 ** (int(z_dims))
-    learning_rate = 10 ** learning_rate
-    l2_regularization = 10 ** l2_regularization
-    kl_imbalance = 10 ** kl_imbalance
-    reconstruction_imbalance = 10 ** reconstruction_imbalance
-    generated_mse_imbalance = 10 ** generated_mse_imbalance
-    likelihood_imbalance = 10 ** likelihood_imbalance
+    # hidden_size = 2 ** (int(hidden_size))
+    # z_dims = 2 ** (int(z_dims))
+    # learning_rate = 10 ** learning_rate
+    # l2_regularization = 10 ** l2_regularization
+    # kl_imbalance = 10 ** kl_imbalance
+    # reconstruction_imbalance = 10 ** reconstruction_imbalance
+    # generated_mse_imbalance = 10 ** generated_mse_imbalance
+    # likelihood_imbalance = 10 ** likelihood_imbalance
 
     print('previous_visit---{}---predicted_visit----{}-'.format(previous_visit, predicted_visit))
     print('hidden_size{}----z_dims{}------learning_rate{}----l2_regularization{}---'
@@ -368,49 +368,48 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
                                                                                       np.mean(r_value_all),
                                                                                       count))
 
-
     tf.compat.v1.reset_default_graph()
-    # return mse_generated_test, mae_generated_test, np.mean(r_value_all)
-    return -1 * mse_generated_test
+    return mse_generated_test, mae_generated_test, np.mean(r_value_all)
+    # return -1 * mse_generated_test
 
 
 if __name__ == '__main__':
-    test_test('RMTPP_VAE_3_3_HF.txt')
+    test_test('RMTPP_VAE_test_3_3_HF.txt')
 
-    Encode_Decode_Time_BO = BayesianOptimization(
-        train, {
-            'hidden_size': (5, 8),
-            'z_dims': (5, 8),
-            'learning_rate': (-5, 1),
-            'l2_regularization': (-5, 1),
-            'kl_imbalance':  (-6, 1),
-            'reconstruction_imbalance': (-6, 1),
-            'generated_mse_imbalance': (-6, 1),
-            'likelihood_imbalance': (-6, 1)
-        }
-    )
-    Encode_Decode_Time_BO.maximize()
-    print(Encode_Decode_Time_BO.max)
+    # Encode_Decode_Time_BO = BayesianOptimization(
+    #     train, {
+    #         'hidden_size': (5, 8),
+    #         'z_dims': (5, 8),
+    #         'learning_rate': (-5, 1),
+    #         'l2_regularization': (-5, 1),
+    #         'kl_imbalance':  (-6, 1),
+    #         'reconstruction_imbalance': (-6, 1),
+    #         'generated_mse_imbalance': (-6, 1),
+    #         'likelihood_imbalance': (-6, 1)
+    #     }
+    # )
+    # Encode_Decode_Time_BO.maximize()
+    # print(Encode_Decode_Time_BO.max)
 
-    # mse_all = []
-    # r_value_all = []
-    # mae_all = []
-    # for i in range(50):
-    #     mse, mae, r_value = train(hidden_size=256,
-    #                               learning_rate=0.004353202451279688,
-    #                               l2_regularization=1e-5,
-    #                               z_dims=256,
-    #                               kl_imbalance=0.004646410534592994,
-    #                               generated_mse_imbalance=0.005286802313064291 ,
-    #                               reconstruction_imbalance=10.0,
-    #                               likelihood_imbalance=10 **(-0.549355852935154))
-    #     mse_all.append(mse)
-    #     r_value_all.append(r_value)
-    #     mae_all.append(mae)
-    #     print("epoch---{}---r_value_ave  {}  mse_all_ave {}  mae_all_ave  {}  "
-    #           "r_value_std {}----mse_all_std  {}  mae_std {}".
-    #           format(i, np.mean(r_value_all), np.mean(mse_all), np.mean(mae_all),
-    #                  np.std(r_value_all), np.std(mse_all),np.std(mae_all)))
+    mse_all = []
+    r_value_all = []
+    mae_all = []
+    for i in range(50):
+        mse, mae, r_value = train(hidden_size=64,
+                                  learning_rate=0.0001881650624164908,
+                                  l2_regularization=0.0002910590421764731,
+                                  z_dims=32,
+                                  kl_imbalance=5.876981151924086,
+                                  generated_mse_imbalance=1.794500319250048e-05 ,
+                                  reconstruction_imbalance=0.18737486220790586,
+                                  likelihood_imbalance=10 **(-.1434231747123196))
+        mse_all.append(mse)
+        r_value_all.append(r_value)
+        mae_all.append(mae)
+        print("epoch---{}---r_value_ave  {}  mse_all_ave {}  mae_all_ave  {}  "
+              "r_value_std {}----mse_all_std  {}  mae_std {}".
+              format(i, np.mean(r_value_all), np.mean(mse_all), np.mean(mae_all),
+                     np.std(r_value_all), np.std(mse_all),np.std(mae_all)))
 
     # mse_all = []
     # mae_all = []

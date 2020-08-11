@@ -344,7 +344,7 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
 
             likelihood_loss = tf.reduce_mean(probability_likelihood)
 
-            loss += mse_reconstruction * reconstruction_imbalance + mse_generated * generated_mse_imbalance + kl_loss_all * kl_imbalance + likelihood_loss * likelihood_imbalance
+            loss += mse_reconstruction * reconstruction_imbalance + mse_generated * 0 + kl_loss_all * kl_imbalance + likelihood_loss * likelihood_imbalance
 
             variables = [var for var in encode_share.trainable_variables]
             for weight in encode_share.trainable_variables:
@@ -453,7 +453,7 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
 
 
 if __name__ == '__main__':
-    test_test('VAE_Hawkes_sigmoid_HF_test__3_3_修改解码器_时间参数大于0.txt')
+    test_test('VAE_Hawkes_sigmoid_HF_test_去掉生成损失__3_3_修改解码器_时间参数大于0.txt')
 
     # Encode_Decode_Time_BO = BayesianOptimization(
     #     train, {
@@ -474,14 +474,14 @@ if __name__ == '__main__':
     r_value_all = []
     mae_all = []
     for i in range(50):
-        mse, mae, r_value = train(hidden_size=32,
-                                  learning_rate=0.007374369907065337,
-                                  l2_regularization=1e-5,
-                                  z_dims=128,
-                                  kl_imbalance=8.254885151295555e-6,
-                                  generated_mse_imbalance=0.24178873322616626,
-                                  reconstruction_imbalance=0.590691186691032,
-                                  likelihood_imbalance=10 **(-3.534136468557273))
+        mse, mae, r_value = train(hidden_size=64,
+                                  learning_rate=0.00010245673520690578,
+                                  l2_regularization=2.1029542217962124e-5,
+                                  z_dims=64,
+                                  kl_imbalance=1.8041445433993945e-5,
+                                  generated_mse_imbalance=1.925952000274114e-5,
+                                  reconstruction_imbalance=8.779973431177126,
+                                  likelihood_imbalance=10 ** (-2.8229012845596806))
         mse_all.append(mse)
         r_value_all.append(r_value)
         mae_all.append(mae)
