@@ -96,23 +96,23 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
     # test_set = np.load("../../Trajectory_generate/dataset_file/test_x.npy").reshape(-1, 6, 60)
     # test_set = np.load("../../Trajectory_generate/dataset_file/validate_x_.npy").reshape(-1, 6, 60)
 
-    train_set = np.load('../../Trajectory_generate/dataset_file/HF_train_.npy').reshape(-1, 6, 30)
+    # train_set = np.load('../../Trajectory_generate/dataset_file/HF_train_.npy').reshape(-1, 6, 30)
     # test_set = np.load('../../Trajectory_generate/dataset_file/HF_validate_.npy').reshape(-1, 6, 30)
-    test_set = np.load('../../Trajectory_generate/dataset_file/HF_test_.npy').reshape(-1, 6, 30)
+    # test_set = np.load('../../Trajectory_generate/dataset_file/HF_test_.npy').reshape(-1, 6, 30)
 
-    # train_set = np.load("../../Trajectory_generate/dataset_file/mimic_train_x_.npy").reshape(-1, 6, 37)
-    # test_set = np.load("../../Trajectory_generate/dataset_file/mimic_test_x_.npy").reshape(-1, 6, 37)
+    train_set = np.load("../../Trajectory_generate/dataset_file/mimic_train_x_.npy").reshape(-1, 6, 37)
+    test_set = np.load("../../Trajectory_generate/dataset_file/mimic_test_x_.npy").reshape(-1, 6, 37)
     # test_set = np.load("../../Trajectory_generate/dataset_file/mimic_validate_.npy").reshape(-1, 6, 37)
 
-    previous_visit = 1
-    predicted_visit = 5
+    previous_visit = 3
+    predicted_visit = 3
 
     feature_dims = train_set.shape[2] - 1
 
     train_set = DataSet(train_set)
     train_set.epoch_completed = 0
     batch_size = 64
-    epochs = 50
+    epochs = 1
 
     # hidden_size = 2**(int(hidden_size))
     # z_dims = 2**(int(z_dims))
@@ -124,6 +124,8 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
     # kl_imbalance = 10 ** kl_imbalance
     # reconstruction_mse_imbalance = 10 ** reconstruction_mse_imbalance
     # likelihood_imbalance = 10 ** likelihood_imbalance
+
+    print('feature_dims---{}'.format(feature_dims))
 
     print('previous_visit---{}---predicted_visit----{}-'.format(previous_visit, predicted_visit))
 
@@ -143,6 +145,7 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
     prior_net = Prior(z_dims=z_dims)
 
     hawkes_process = HawkesProcess()
+
 
     loss = 0
     count = 0
@@ -194,7 +197,7 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
                 current_time_index_shape = tf.ones(shape=[previous_visit+predicted_visit_])
                 condition_value, likelihood = hawkes_process([input_t_train, current_time_index_shape])
                 probability_likelihood = tf.concat((probability_likelihood, tf.reshape(likelihood, [batch, -1, 1])), axis=1)
-                probability_likelihood = tf.keras.activations.sigmoid(probability_likelihood)
+                probability_likelihood = tf.keras.activations.softmax(probability_likelihood)
                 # generation
                 generated_next_visit, decode_c_generate, decode_h_generate = decoder_share([z_prior, context_state, sequence_last_time, decode_c_generate, decode_h_generate*condition_value])
                 # reconstruction
@@ -269,6 +272,13 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
         optimizer_generation.apply_gradients(zip(gradient_gen, variables))
 
         if train_set.epoch_completed % 1 == 0 and train_set.epoch_completed not in logged:
+            encode_share.load_weights('encode_share_3_3_mimic.h5')
+            decoder_share.load_weights('decode_share_3_3_mimic.h5')
+            discriminator.load_weights('discriminator_3_3_mimic.h5')
+            post_net.load_weights('post_net_3_3_mimic.h5')
+            prior_net.load_weights('prior_net_3_3_mimic.h5')
+            hawkes_process.load_weights('hawkes_process_3_3_mimic.h5')
+
             logged.add(train_set.epoch_completed)
             loss_pre = generated_mse_loss
 
@@ -343,13 +353,26 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
                                                           mse_generated_test, mae_generated_test,
                                                           np.mean(r_value_all), count))
 
+            # if np.mean(r_value_all) > 0.9355:
+            #     np.savetxt('generated_trajectory_test.csv', generated_trajectory_test.numpy().reshape(-1, feature_dims), delimiter=',')
+            #     print('保存成功！')
+
+            # if mse_generated_test < 0.0107:
+            #     encode_share.save_weights('encode_share_3_3_mimic.h5')
+            #     decoder_share.save_weights('decode_share_3_3_mimic.h5')
+            #     discriminator.save_weights('discriminator_3_3_mimic.h5')
+            #     post_net.save_weights('post_net_3_3_mimic.h5')
+            #     prior_net.save_weights('prior_net_3_3_mimic.h5')
+            #     hawkes_process.save_weights('hawkes_process_3_3_mimic.h5')
+            #     print('保存成功！')
+
     tf.compat.v1.reset_default_graph()
     return mse_generated_test, mae_generated_test, np.mean(r_value_all)
     # return -1 * mse_generated_test
 
 
 if __name__ == '__main__':
-    test_test('VAE_Hawkes_GAN_HF_test__1_5_重新训练_v2_7_26.txt')
+    test_test('VAE_Hawkes_GAN_HF_MIMIC_3_3_重新训练——8——27.txt')
     # BO = BayesianOptimization(
     #     train, {
     #         'hidden_size': (5, 8),
@@ -372,16 +395,16 @@ if __name__ == '__main__':
     r_value_all = []
     mae_all = []
     for i in range(50):
-        mse, mae, r_value = train(hidden_size=128,
-                                  z_dims=128,
-                                  learning_rate=0.0010397694211860807,
-                                  l2_regularization=0.003599184693130434,
-                                  n_disc=7,
-                                  generated_mse_imbalance=0.0055042888323120435,
-                                  generated_loss_imbalance=0.04510469926631608,
-                                  kl_imbalance=0.2629980029801725,
-                                  reconstruction_mse_imbalance=1.9765371389973956e-6,
-                                  likelihood_imbalance=6.655767064468706e-5)
+        mse, mae, r_value = train(hidden_size=32,
+                                  z_dims=64,
+                                  learning_rate=0.007122273166129031,
+                                  l2_regularization=8.931354194538156e-05,
+                                  n_disc=3,
+                                  generated_mse_imbalance=0.23927614146670084,
+                                  generated_loss_imbalance=0.03568210662431517,
+                                  kl_imbalance=0.00462105286455568,
+                                  reconstruction_mse_imbalance=0.003925185127256372,
+                                  likelihood_imbalance=2.3046966638597164)
         mse_all.append(mse)
         r_value_all.append(r_value)
         mae_all.append(mae)

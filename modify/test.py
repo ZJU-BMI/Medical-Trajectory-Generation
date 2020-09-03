@@ -197,9 +197,9 @@ class HawkesProcess(Model):
         input_t, current_time_index_shape = input_x
         current_time_index = tf.shape(current_time_index_shape)[0]
         batch = tf.shape(input_t)[0]
-        trigger_alpha = tf.tile(self.trigger_parameter_alpha, [batch, 1])
-        trigger_beta = tf.tile(self.trigger_parameter_beta, [batch, 1])
-        base_intensity = tf.tile(self.base_intensity, [batch, 1])
+        trigger_alpha = tf.tile(tf.keras.activations.sigmoid(self.trigger_parameter_alpha), [batch, 1])
+        trigger_beta = tf.tile(tf.keras.activations.sigmoid(self.trigger_parameter_beta), [batch, 1])
+        base_intensity = tf.tile(tf.keras.activations.sigmoid(self.base_intensity), [batch, 1])
 
         condition_intensity = self.calculate_lambda_process(input_t, current_time_index,
                                                             trigger_alpha, trigger_beta, base_intensity)
@@ -448,35 +448,9 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
                                                                                       np.mean(r_value_all),
                                                                                       count))
 
-        # if mse_generated_test < 0.008 and train_set.epoch_completed > 40:
-        #     checkpoint_encode_share = tf.train.Checkpoint(encode_share=encode_share)
-        #     path = './model/encoder_share/' + str(train_set.epoch_completed) + '.ckpt'
-        #     path_encoder = checkpoint_encode_share.save(path)
-        #     print(path_encoder)
-        #
-        #     checkpoint_decode_share = tf.train.Checkpoint(decoder_share=decoder_share)
-        #     path = './model/decoder_share/' + str(train_set.epoch_completed) + '.ckpt'
-        #     path_decoder = checkpoint_decode_share.save(path)
-        #     print(path_decoder)
-        #
-        #     checkpoint_post = tf.train.Checkpoint(post_net=post_net)
-        #     path = './model/checkpoint_post/' + str(train_set.epoch_completed) + '.ckpt'
-        #     path_post = checkpoint_post.save(path)
-        #     print(path_post)
-        #
-        #     checkpoint_prior = tf.train.Checkpoint(prior_net=prior_net)
-        #     path = './model/checkpoint_prior/' + str(train_set.epoch_completed) + '.ckpt'
-        #     path_prior = checkpoint_prior.save(path)
-        #     print(path_prior)
-        #
-        #     checkpoint_hawkes = tf.train.Checkpoint(hawkes_process=hawkes_process)
-        #     path = './model/checkpoint_hawkes/' + str(train_set.epoch_completed) + '.ckpt'
-        #     path_hawkes = checkpoint_hawkes.save(path)
-        #     print(path_hawkes)
-
     tf.compat.v1.reset_default_graph()
-    return mse_generated_test, mae_generated_test, np.mean(r_value_all)
-    # return -1 * mse_generated_test
+    # return mse_generated_test, mae_generated_test, np.mean(r_value_all)
+    return -1 * mse_generated_test
 
 
 def test():
@@ -573,42 +547,42 @@ def test():
 
 
 if __name__ == '__main__':
-    test_test('VAE_Hawkes_sigmoid_HF_test__1_5_重新训练_8_7.txt')
+    test_test('VAE_Hawkes_sigmoid_MIMIC_train__3_3_重新训练_8_17.txt')
 
-    # Encode_Decode_Time_BO = BayesianOptimization(
-    #     train, {
-    #         'hidden_size': (5, 8),
-    #         'z_dims': (5, 8),
-    #         'learning_rate': (-5, 1),
-    #         'l2_regularization': (-5, 1),
-    #         'kl_imbalance':  (-6, 1),
-    #         'reconstruction_imbalance': (-6, 1),
-    #         'generated_mse_imbalance': (-6, 1),
-    #         'likelihood_imbalance': (-6, 1)
-    #     }
-    # )
-    # Encode_Decode_Time_BO.maximize()
-    # print(Encode_Decode_Time_BO.max)
+    Encode_Decode_Time_BO = BayesianOptimization(
+        train, {
+            'hidden_size': (5, 8),
+            'z_dims': (5, 8),
+            'learning_rate': (-5, 1),
+            'l2_regularization': (-5, 1),
+            'kl_imbalance':  (-6, 1),
+            'reconstruction_imbalance': (-6, 1),
+            'generated_mse_imbalance': (-6, 1),
+            'likelihood_imbalance': (-6, 1)
+        }
+    )
+    Encode_Decode_Time_BO.maximize()
+    print(Encode_Decode_Time_BO.max)
 
-    mse_all = []
-    r_value_all = []
-    mae_all = []
-    for i in range(50):
-        mse, mae, r_value = train(hidden_size=256,
-                                  learning_rate=0.004353202451279688,
-                                  l2_regularization=1e-5,
-                                  z_dims=256,
-                                  kl_imbalance=0.004646410534592994,
-                                  generated_mse_imbalance=0.005286802313064291 ,
-                                  reconstruction_imbalance=10.0,
-                                  likelihood_imbalance=10 **(-0.549355852935154))
-        mse_all.append(mse)
-        r_value_all.append(r_value)
-        mae_all.append(mae)
-        print("epoch---{}---r_value_ave  {}  mse_all_ave {}  mae_all_ave  {}  "
-              "r_value_std {}----mse_all_std  {}  mae_std {}".
-              format(i, np.mean(r_value_all), np.mean(mse_all), np.mean(mae_all),
-                     np.std(r_value_all), np.std(mse_all),np.std(mae_all)))
+    # mse_all = []
+    # r_value_all = []
+    # mae_all = []
+    # for i in range(50):
+    #     mse, mae, r_value = train(hidden_size=256,
+    #                               learning_rate=0.004353202451279688,
+    #                               l2_regularization=1e-5,
+    #                               z_dims=256,
+    #                               kl_imbalance=0.004646410534592994,
+    #                               generated_mse_imbalance=0.005286802313064291 ,
+    #                               reconstruction_imbalance=10.0,
+    #                               likelihood_imbalance=10 **(-0.549355852935154))
+    #     mse_all.append(mse)
+    #     r_value_all.append(r_value)
+    #     mae_all.append(mae)
+    #     print("epoch---{}---r_value_ave  {}  mse_all_ave {}  mae_all_ave  {}  "
+    #           "r_value_std {}----mse_all_std  {}  mae_std {}".
+    #           format(i, np.mean(r_value_all), np.mean(mse_all), np.mean(mae_all),
+    #                  np.std(r_value_all), np.std(mse_all),np.std(mae_all)))
 
     # mse_all = []
     # mae_all = []
