@@ -1,19 +1,54 @@
 import tensorflow as tf
-from tensorflow_core.python.keras.models import Model
+from tensorflow.keras.models import Model
 from data import DataSet
 from bayes_opt import BayesianOptimization
 import scipy.stats as stats
 import numpy as np
 import sys
 import os
+from scipy.spatial.distance import cdist
 
 import warnings
-warnings.filterwarnings(action='once')
+warnings.filterwarnings(action='ignore')
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 gpus = tf.config.experimental.list_physical_devices(device_type='GPU')
 for gpu in gpus:
     tf.config.experimental.set_memory_growth(gpu, True)
+
+def DynamicTimeWarping(ptSetA, ptSetB):
+    # 获得点集ptSetA中点的个数n
+    n = ptSetA.shape[0]
+    # 获得点集ptSetB中点的个数m
+    m = ptSetB.shape[0]
+    # 计算任意两个点的距离矩阵
+    disMat = cdist(ptSetA, ptSetB, metric='euclidean')
+    # 初始化消耗矩阵
+    costMatrix = np.full((n,m),-1.0)
+    # 递归求解DTW距离
+    dtwDis = _dtw(disMat,costMatrix,n-1,m-1)
+    return dtwDis
+
+
+def _dtw(disMat,costMatrix,i,j):
+    # 如果costMatrix[i][j]不等于-1，直接返回，不需要计算了（借助动态规划的思想）
+    if costMatrix[i][j] > -1:
+        return costMatrix[i][j]
+    # 当i,j都等于0的时候，计算消耗矩阵的值
+    if i == 0 and j == 0:
+        costMatrix[i][j] = disMat[0][0]
+    # 计算第一列的值
+    if i > 0 and j == 0:
+        costMatrix[i][j] = _dtw(disMat, costMatrix, i - 1, 0) + disMat[i][0]
+    # 计算第一行的值
+    if i == 0 and j > 0:
+        costMatrix[i][j] = _dtw(disMat, costMatrix, 0, j - 1) + disMat[0][j]
+    # 计算其他值
+    if i > 0 and j > 0:
+        costMatrix[i][j] = min(_dtw(disMat, costMatrix, i, j-1),
+                               _dtw(disMat, costMatrix, i - 1, j-1),
+                               _dtw(disMat, costMatrix, i - 1, j)) + disMat[i][j]
+    return costMatrix[i][j]
 
 
 # 单步执行编码的过程
@@ -60,8 +95,10 @@ class Prior(Model):
         self.dense1 = tf.keras.layers.Dense(z_dims)
         self.dense2 = tf.keras.layers.Dense(z_dims)
         self.dense3 = tf.keras.layers.Dense(z_dims, activation=tf.nn.sigmoid)  # obtain hidden z
-        self.dense4 = tf.keras.layers.Dense(z_dims, activation=tf.nn.sigmoid)
-        self.dense5 = tf.keras.layers.Dense(z_dims, activation=tf.nn.sigmoid)
+        # self.dense4 = tf.keras.layers.Dense(z_dims, activation=tf.nn.sigmoid)
+        # self.dense5 = tf.keras.layers.Dense(z_dims, activation=tf.nn.sigmoid)
+        self.dense4 = tf.keras.layers.Dense(z_dims, activation='relu')
+        self.dense5 = tf.keras.layers.Dense(z_dims, activation='relu')
 
     def call(self, input_x):
         hidden_1 = self.dense1(input_x)
@@ -73,11 +110,12 @@ class Prior(Model):
         return z, z_mean, z_log_var
 
     def reparameterize(self, mu, log_var, z_dims):
-        batch = tf.shape(mu)[0]
-        sample_all = tf.zeros(shape=(batch, 0))
-        for feature in range(z_dims):
-            sample = tf.compat.v1.random_normal(shape=(batch, 1))
-            sample_all = tf.concat((sample_all, sample), axis=1)
+        # batch = tf.shape(mu)[0]
+        # sample_all = tf.zeros(shape=(batch, 0))
+        # for feature in range(z_dims):
+        #     sample = tf.compat.v1.random_normal(shape=(batch, 1))
+        #     sample_all = tf.concat((sample_all, sample), axis=1)
+        sample_all = tf.compat.v1.random_normal(tf.shape(mu), 0, 1, dtype=tf.float32)
         z = mu + tf.multiply(sample_all, tf.math.sqrt(tf.exp(log_var)))
         return z
 
@@ -95,11 +133,13 @@ class Post(Model):
         self.dense5 = tf.keras.layers.Dense(z_dims, activation=tf.nn.sigmoid)
 
     def reparameterize(self, mu, log_var, z_dims):
-        batch = tf.shape(mu)[0]
-        sample_all = tf.zeros(shape=(batch, 0))
-        for feature in range(z_dims):
-            sample = tf.compat.v1.random_normal(shape=(batch, 1))
-            sample_all = tf.concat((sample_all, sample), axis=1)
+        # batch = tf.shape(mu)[0]
+        # sample_all = tf.zeros(shape=(batch, 0))
+        # for feature in range(z_dims):
+        #     sample = tf.compat.v1.random_normal(shape=(batch, 1))
+        #     sample_all = tf.concat((sample_all, sample), axis=1)
+        # z = mu + tf.multiply(sample_all, tf.math.sqrt(tf.exp(log_var)))
+        sample_all = tf.compat.v1.random_normal(tf.shape(mu), 0, 1, dtype=tf.float32)
         z = mu + tf.multiply(sample_all, tf.math.sqrt(tf.exp(log_var)))
         return z
 
@@ -125,9 +165,9 @@ def kl_loss(z_mean_post, log_var_post, z_mean_prior, log_var_prior):
 
 
 def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, reconstruction_imbalance, generated_mse_imbalance):
-    train_set = np.load('../../Trajectory_generate/dataset_file/HF_train_.npy').reshape(-1, 6, 30)[:, :, 1:]
-    # test_set = np.load('../../Trajectory_generate/dataset_file/HF_validate_.npy').reshape(-1, 6, 30)[:, :, 1:]
-    test_set = np.load('../../Trajectory_generate/dataset_file/HF_test_.npy').reshape(-1, 6, 30)[:, :, 1:]
+    # train_set = np.load('../../Trajectory_generate/dataset_file/HF_train_.npy').reshape(-1, 6, 30)[:, :, 1:26]
+    # test_set = np.load('../../Trajectory_generate/dataset_file/HF_validate_.npy').reshape(-1, 6, 30)[:, :, 1:26]
+    # test_set = np.load('../../Trajectory_generate/dataset_file/HF_test_.npy').reshape(-1, 6, 30)[:, :, 1:26]
 
     # train_set = np.load("../../Trajectory_generate/dataset_file/train_x_.npy").reshape(-1, 6, 60)[:, :, 1:]
     # test_set = np.load("../../Trajectory_generate/dataset_file/test_x.npy").reshape(-1, 6, 60)[:, :, 1:]
@@ -137,16 +177,21 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
     # test_set = np.load("../../Trajectory_generate/dataset_file/mimic_test_x_.npy").reshape(-1, 6, 37)[:, :, 1:]
     # test_set = np.load("../../Trajectory_generate/dataset_file/mimic_validate_.npy").reshape(-1, 6, 37)[:, :, 1:]
 
-    previous_visit = 1
-    predicted_visit = 2
+    # sepsis mimic dataset
+    train_set = np.load('../../Trajectory_generate/dataset_file/sepsis_mimic_train.npy').reshape(-1, 13, 40)[:, :, 1:]
+    test_set = np.load('../../Trajectory_generate/dataset_file/sepsis_mimic_test.npy').reshape(-1, 13, 40)[:, :, 1:]
+    # test_set = np.load('../../Trajectory_generate/dataset_file/sepsis_mimic_validate.npy').reshape(-1, 13, 40)[:, :, 1:]
+
+    previous_visit = 3
+    predicted_visit = 10
 
     feature_dims = train_set.shape[2]
 
     train_set = DataSet(train_set)
     train_set.epoch_completed = 0
     batch_size = 64
-    epochs = 1
-    #
+    epochs = 50
+    # #
     # hidden_size = 2 ** (int(hidden_size))
     # z_dims = 2 ** (int(z_dims))
     # learning_rate = 10 ** learning_rate
@@ -260,10 +305,6 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
             optimizer.apply_gradients(zip(gradient, variables))
 
             if train_set.epoch_completed % 1 == 0 and train_set.epoch_completed not in logged:
-                encode_share.load_weights('encode_share_1_2.h5')
-                decode_share.load_weights('decode_share_1_2.h5')
-                prior_net.load_weights('prior_share_1_2.h5')
-                post_net.load_weights('post_net_1_2.h5')
                 logged.add(train_set.epoch_completed)
                 loss_pre = mse_generate
                 mse_reconstruction = tf.reduce_mean(
@@ -324,29 +365,24 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
                 mse_generate_test = tf.reduce_mean(tf.keras.losses.mse(input_x_test[:, previous_visit:previous_visit+predicted_visit,:], generated_trajectory_test))
                 mae_generate_test = tf.reduce_mean(tf.keras.losses.mae(input_x_test[:, previous_visit:previous_visit+predicted_visit,:], generated_trajectory_test))
                 r_value_all = []
-                p_value_all = []
-                for r in range(predicted_visit):
-                    x_ = tf.reshape(input_x_test[:, previous_visit + r, :], (-1,))
-                    y_ = tf.reshape(generated_trajectory_test[:, r, :], (-1,))
-                    r_value_ = stats.pearsonr(x_, y_)
-                    r_value_all.append(r_value_[0])
-                    p_value_all.append(r_value_[1])
-
+                for patient in range(batch_test):
+                    r_value = 0.0
+                    for feature in range(feature_dims):
+                        x_ = input_x_test[patient, previous_visit:, feature].numpy().reshape(predicted_visit, 1)
+                        y_ = generated_trajectory_test[patient, :, feature].numpy().reshape(predicted_visit, 1)
+                        r_value += DynamicTimeWarping(x_, y_)
+                    r_value_all.append(r_value / 29.0)
                 print("epoch  {}---train_mse_generate {}--train_reconstruct {}--train_kl "
-                      "{}--test_mse {}--test_mae  {}----r_value {}---count {}".format(train_set.epoch_completed,
-                                                                                      mse_generate,
-                                                                                      mse_reconstruction,
-                                                                                      kl_loss_all,
-                                                                                      mse_generate_test,
-                                                                                      mae_generate_test,
-                                                                                      np.mean(r_value_all),
-                                                                                      count))
-                #
-                # if mse_generate_test < 0.0088:
-                #     encode_share.save_weights('encode_share_1_2.h5')
-                #     decode_share.save_weights('decode_share_1_2.h5')
-                #     prior_net.save_weights('prior_share_1_2.h5')
-                #     post_net.save_weights('post_net_1_2.h5')
+                      "{}--test_mse {}--test_mae  {}----r_value {}---count {}".
+                      format(train_set.epoch_completed,
+                             mse_generate,
+                             mse_reconstruction,
+                             kl_loss_all,
+                             mse_generate_test,
+                             mae_generate_test,
+                             np.mean(r_value_all),
+                             count))
+
     tf.compat.v1.reset_default_graph()
     return mse_generate_test, mae_generate_test, np.mean(r_value_all)
     # return -1*mse_generate_test
@@ -375,7 +411,7 @@ def test_test(name):
 
 
 if __name__ == '__main__':
-    test_test('VAE_HF_1_2_test_重新训练.txt')
+    test_test('VAE_SEPSIS_重新训练_DTW_test.txt')
     # Encode_Decode_Time_BO = BayesianOptimization(
     #     train, {
     #         'hidden_size': (5, 8),
@@ -389,34 +425,25 @@ if __name__ == '__main__':
     # )
     # Encode_Decode_Time_BO.maximize()
     # print(Encode_Decode_Time_BO.max)
+
     mse_all = []
     r_value_all = []
     mae_all = []
+
     for i in range(50):
-        mse, mae, r_value = train(hidden_size=64,
-                                  learning_rate=0.006999290958868791,
-                                  l2_regularization=1.751017454362448e-5,
-                                  z_dims=32,
-                                  kl_imbalance=1.3571405843562536,
-                                  generated_mse_imbalance=7.00175457930852e-5,
-                                  reconstruction_imbalance=0.14126243036225303)
+        mse, mae, r_value = \
+            train(hidden_size=32,
+                  learning_rate=5.711154086635728e-05,
+                  l2_regularization=1e-05,
+                  z_dims=256,
+                  kl_imbalance=1e-6,
+                  generated_mse_imbalance=0.1,
+                  reconstruction_imbalance=0.8179635559463695)
         mse_all.append(mse)
         r_value_all.append(r_value)
         mae_all.append(mae)
         print("epoch{}----r_value_ave  {}  mse_all_ave {}  mae_all_ave  {}  "
-              "r_value_std {}----mse_all_std  {}  mae_std {}".
+              "r_value_std {}----mse_all_std  {}  mae_std {} ".
               format(i, np.mean(r_value_all), np.mean(mse_all),
                      np.mean(mae_all), np.std(r_value_all), np.std(mse_all), np.std(mae_all)))
-
-
-
-
-
-
-
-
-
-
-
-
 

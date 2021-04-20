@@ -1,5 +1,5 @@
 import tensorflow as tf
-from tensorflow_core.python.keras.models import Model
+from tensorflow.keras.models import Model
 from data import DataSet
 from bayes_opt import BayesianOptimization
 import scipy.stats as stats
@@ -7,14 +7,49 @@ import numpy as np
 import sys
 import os
 from TimeLSTMCell_3 import *
+from scipy.spatial.distance import cdist
 
 import warnings
-warnings.filterwarnings(action='once')
+warnings.filterwarnings(action='ignore')
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 gpus = tf.config.experimental.list_physical_devices(device_type='GPU')
 for gpu in gpus:
     tf.config.experimental.set_memory_growth(gpu, True)
+
+def DynamicTimeWarping(ptSetA, ptSetB):
+    # 获得点集ptSetA中点的个数n
+    n = ptSetA.shape[0]
+    # 获得点集ptSetB中点的个数m
+    m = ptSetB.shape[0]
+    # 计算任意两个点的距离矩阵
+    disMat = cdist(ptSetA, ptSetB, metric='euclidean')
+    # 初始化消耗矩阵
+    costMatrix = np.full((n,m),-1.0)
+    # 递归求解DTW距离
+    dtwDis = _dtw(disMat,costMatrix,n-1,m-1)
+    return dtwDis
+
+
+def _dtw(disMat,costMatrix,i,j):
+    # 如果costMatrix[i][j]不等于-1，直接返回，不需要计算了（借助动态规划的思想）
+    if costMatrix[i][j] > -1:
+        return costMatrix[i][j]
+    # 当i,j都等于0的时候，计算消耗矩阵的值
+    if i == 0 and j == 0:
+        costMatrix[i][j] = disMat[0][0]
+    # 计算第一列的值
+    if i > 0 and j == 0:
+        costMatrix[i][j] = _dtw(disMat, costMatrix, i - 1, 0) + disMat[i][0]
+    # 计算第一行的值
+    if i == 0 and j > 0:
+        costMatrix[i][j] = _dtw(disMat, costMatrix, 0, j - 1) + disMat[0][j]
+    # 计算其他值
+    if i > 0 and j > 0:
+        costMatrix[i][j] = min(_dtw(disMat, costMatrix, i, j-1),
+                               _dtw(disMat, costMatrix, i - 1, j-1),
+                               _dtw(disMat, costMatrix, i - 1, j)) + disMat[i][j]
+    return costMatrix[i][j]
 
 
 # 单步执行编码的过程
@@ -75,11 +110,13 @@ class Prior(Model):
         return z, z_mean, z_log_var
 
     def reparameterize(self, mu, log_var, z_dims):
-        batch = tf.shape(mu)[0]
-        sample_all = tf.zeros(shape=(batch, 0))
-        for feature in range(z_dims):
-            sample = tf.compat.v1.random_normal(shape=(batch, 1))
-            sample_all = tf.concat((sample_all, sample), axis=1)
+        # batch = tf.shape(mu)[0]
+        # sample_all = tf.zeros(shape=(batch, 0))
+        # for feature in range(z_dims):
+        #     sample = tf.compat.v1.random_normal(shape=(batch, 1))
+        #     sample_all = tf.concat((sample_all, sample), axis=1)
+        # z = mu + tf.multiply(sample_all, tf.math.sqrt(tf.exp(log_var)))
+        sample_all = tf.compat.v1.random_normal(tf.shape(mu), 0, 1, dtype=tf.float32)
         z = mu + tf.multiply(sample_all, tf.math.sqrt(tf.exp(log_var)))
         return z
 
@@ -97,11 +134,13 @@ class Post(Model):
         self.dense5 = tf.keras.layers.Dense(z_dims, activation=tf.nn.sigmoid)
 
     def reparameterize(self, mu, log_var, z_dims):
-        batch = tf.shape(mu)[0]
-        sample_all = tf.zeros(shape=(batch, 0))
-        for feature in range(z_dims):
-            sample = tf.compat.v1.random_normal(shape=(batch, 1))
-            sample_all = tf.concat((sample_all, sample), axis=1)
+        # batch = tf.shape(mu)[0]
+        # sample_all = tf.zeros(shape=(batch, 0))
+        # for feature in range(z_dims):
+        #     sample = tf.compat.v1.random_normal(shape=(batch, 1))
+        #     sample_all = tf.concat((sample_all, sample), axis=1)
+        # z = mu + tf.multiply(sample_all, tf.math.sqrt(tf.exp(log_var)))
+        sample_all = tf.compat.v1.random_normal(tf.shape(mu), 0, 1, dtype=tf.float32)
         z = mu + tf.multiply(sample_all, tf.math.sqrt(tf.exp(log_var)))
         return z
 
@@ -127,8 +166,8 @@ def kl_loss(z_mean_post, log_var_post, z_mean_prior, log_var_prior):
 
 
 def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, reconstruction_imbalance, generated_mse_imbalance):
-    train_set = np.load("../../Trajectory_generate/dataset_file/HF_train_.npy").reshape(-1, 6, 30)
-    test_set = np.load("../../Trajectory_generate/dataset_file/HF_test_.npy").reshape(-1, 6, 30)
+    # train_set = np.load("../../Trajectory_generate/dataset_file/HF_train_.npy").reshape(-1, 6, 30)
+    # test_set = np.load("../../Trajectory_generate/dataset_file/HF_test_.npy").reshape(-1, 6, 30)
     # test_set = np.load("../../Trajectory_generate/dataset_file/HF_validate_.npy").reshape(-1, 6, 30)
 
     # train_set = np.load("../../Trajectory_generate/dataset_file/train_x_.npy").reshape(-1, 6, 60)[:, :, 1:]
@@ -139,8 +178,12 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
     # test_set = np.load("../../Trajectory_generate/dataset_file/mimic_test_x_.npy").reshape(-1, 6, 37)
     # test_set = np.load("../../Trajectory_generate/dataset_file/mimic_validate_.npy").reshape(-1, 6, 37)
 
-    previous_visit = 1
-    predicted_visit = 4
+    train_set = np.load('../../Trajectory_generate/dataset_file/sepsis_mimic_train.npy').reshape(-1, 13, 40)
+    test_set = np.load('../../Trajectory_generate/dataset_file/sepsis_mimic_test.npy').reshape(-1, 13, 40)
+    # test_set = np.load('../../Trajectory_generate/dataset_file/sepsis_mimic_validate.npy').reshape(-1, 13, 40)
+
+    previous_visit = 3
+    predicted_visit = 10
 
     feature_dims = train_set.shape[2] - 1
 
@@ -322,26 +365,61 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, kl_imbalance, r
 
                 mse_generate_test = tf.reduce_mean(tf.keras.losses.mse(input_x_test[:, previous_visit:previous_visit+predicted_visit,:], generated_trajectory_test))
                 mae_generate_test = tf.reduce_mean(tf.keras.losses.mae(input_x_test[:, previous_visit:previous_visit+predicted_visit,:], generated_trajectory_test))
-                r_value_all = []
-                p_value_all = []
-                for r in range(predicted_visit):
-                    x_ = tf.reshape(input_x_test[:, previous_visit + r, :], (-1,))
-                    y_ = tf.reshape(generated_trajectory_test[:, r, :], (-1,))
-                    r_value_ = stats.pearsonr(x_, y_)
-                    r_value_all.append(r_value_[0])
-                    p_value_all.append(r_value_[1])
 
+                r_value_all = []
+                for patient in range(batch_test):
+                    r_value = 0.0
+                    for feature in range(feature_dims):
+                        x_ = input_x_test[patient, previous_visit:, feature].numpy().reshape(predicted_visit, 1)
+                        y_ = generated_trajectory_test[patient, :, feature].numpy().reshape(predicted_visit, 1)
+                        r_value += DynamicTimeWarping(x_, y_)
+                    r_value_all.append(r_value / 29.0)
                 print("epoch  {}---train_mse_generate {}--train_reconstruct {}--train_kl "
-                      "{}--test_mse {}--test_mae  {}----r_value {}---count {}".format(train_set.epoch_completed,
-                                                                                      mse_generate,
-                                                                                      mse_reconstruction,
-                                                                                      kl_loss_all,
-                                                                                      mse_generate_test,
-                                                                                      mae_generate_test,
-                                                                                      np.mean(r_value_all),
-                                                                                      count))
+                      "{}--test_mse {}--test_mae  {}---"
+                      "-r_value {}---count {}".format(train_set.epoch_completed,
+                                                      mse_generate,
+                                                      mse_reconstruction,
+                                                      kl_loss_all,
+                                                      mse_generate_test,
+                                                      mae_generate_test,
+                                                      np.mean(r_value_all),
+                                                      count))
+                # r_value_all = []
+                # p_value_all = []
+                # r_value_spearman_all = []
+                # r_value_kendalltau_all = []
+                # for visit in range(predicted_visit):
+                #     for feature in range(feature_dims):
+                #         x_ = input_x_test[:, previous_visit+visit, feature]
+                #         y_ = generated_trajectory_test[:, visit, feature]
+                #         r_value_pearson = stats.pearsonr(x_, y_)
+                #         r_value_spearman = stats.spearmanr(x_, y_)
+                #         r_value_kendalltau = stats.kendalltau(x_, y_)
+                #         if not np.isnan(r_value_pearson[0]):
+                #             r_value_all.append(np.abs(r_value_pearson[0]))
+                #             p_value_all.append(np.abs(r_value_pearson[1]))
+                #
+                #         if not np.isnan(r_value_spearman[0]):
+                #             r_value_spearman_all.append(np.abs(r_value_spearman[0]))
+                #
+                #         if not np.isnan(r_value_kendalltau[0]):
+                #             r_value_kendalltau_all.append(np.abs(r_value_kendalltau[0]))
+
+                # print("epoch  {}---train_mse_generate {}--train_reconstruct {}--train_kl "
+                #       "{}--test_mse {}--test_mae  {}----r_value {}---r_value_spearman---{}-"
+                #       "r_value_kendalltau---{}---count {}".format(train_set.epoch_completed,
+                #                                                   mse_generate,
+                #                                                   mse_reconstruction,
+                #                                                   kl_loss_all,
+                #                                                   mse_generate_test,
+                #                                                   mae_generate_test,
+                #                                                   np.mean(r_value_all),
+                #                                                   np.mean(r_value_spearman_all),
+                #                                                   np.mean(r_value_kendalltau_all),
+                #                                                   count))
     tf.compat.v1.reset_default_graph()
     return mse_generate_test, mae_generate_test, np.mean(r_value_all)
+    # return mse_generate_test, mae_generate_test, np.mean(r_value_all), np.mean(r_value_spearman_all), np.mean(r_value_kendalltau_all)
     # return -1*mse_generate_test
 
 
@@ -368,48 +446,25 @@ def test_test(name):
 
 
 if __name__ == '__main__':
-    test_test('VAE_Time_3_HF_test_1_4_7_27.txt')
-    # Encode_Decode_Time_BO = BayesianOptimization(
-    #     train, {
-    #         'hidden_size': (5, 8),
-    #         'z_dims': (5, 8),
-    #         'learning_rate': (-5, -1),
-    #         'l2_regularization': (-5, -1),
-    #         'kl_imbalance':  (-6, 1),
-    #         'reconstruction_imbalance': (-6, 1),
-    #         'generated_mse_imbalance': (-6, -1),
-    #     }
-    # )
-    # Encode_Decode_Time_BO.maximize()
-    # print(Encode_Decode_Time_BO.max)
+    test_test('VAE_Time_3_sepsis_重新训练_DTW_test.txt')
     mse_all = []
     r_value_all = []
     mae_all = []
     for i in range(50):
-        mse, mae, r_value = train(hidden_size=32,
-                                  learning_rate=0.0014803522392820587,
-                                  l2_regularization=6.755560618468788e-5,
-                                  z_dims=128,
-                                  kl_imbalance=2.0685467044875594,
-                                  generated_mse_imbalance=6.890415141653489e-6,
-                                  reconstruction_imbalance=9.082716749231874)
+        mse, mae, r_value = \
+            train(hidden_size=128,
+                  learning_rate=0.00012393005620833582,
+                  l2_regularization=0.0003305321527447188,
+                  z_dims=128,
+                  kl_imbalance=0.3646916733901115,
+                  generated_mse_imbalance=0.0003208980303305599,
+                  reconstruction_imbalance=4.767885655091974)
         mse_all.append(mse)
         r_value_all.append(r_value)
         mae_all.append(mae)
         print("epoch{}----r_value_ave  {}  mse_all_ave {}  mae_all_ave  {}  "
               "r_value_std {}----mse_all_std  {}  mae_std {}".
               format(i, np.mean(r_value_all), np.mean(mse_all),
-                     np.mean(mae_all), np.std(r_value_all), np.std(mse_all), np.std(mae_all)))
-
-
-
-
-
-
-
-
-
-
-
-
+                     np.mean(mae_all), np.std(r_value_all),
+                     np.std(mse_all), np.std(mae_all)))
 

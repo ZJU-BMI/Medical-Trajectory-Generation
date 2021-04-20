@@ -77,11 +77,13 @@ class Prior(Model):
         return z, z_mean, z_log_var
 
     def reparameterize(self, mu, log_var, z_dims):
-        batch = tf.shape(mu)[0]
-        sample_all = tf.zeros(shape=(batch, 0))
-        for feature in range(z_dims):
-            sample = tf.compat.v1.random_normal(shape=(batch, 1))
-            sample_all = tf.concat((sample_all, sample), axis=1)
+        # batch = tf.shape(mu)[0]
+        # sample_all = tf.zeros(shape=(batch, 0))
+        # for feature in range(z_dims):
+        #     sample = tf.compat.v1.random_normal(shape=(batch, 1))
+        #     sample_all = tf.concat((sample_all, sample), axis=1)
+        # z = mu + tf.multiply(sample_all, tf.math.sqrt(tf.exp(log_var)))
+        sample_all = tf.compat.v1.random_normal(tf.shape(mu), 0, 1, dtype=tf.float32)
         z = mu + tf.multiply(sample_all, tf.math.sqrt(tf.exp(log_var)))
         return z
 
@@ -114,11 +116,13 @@ class Post(Model):
         return z, z_mean, z_log_var
 
     def reparameterize(self, mu, log_var, z_dims):
-        batch = tf.shape(mu)[0]
-        sample_all = tf.zeros(shape=(batch, 0))
-        for feature in range(z_dims):
-            sample = tf.compat.v1.random_normal(shape=(batch, 1))
-            sample_all = tf.concat((sample_all, sample), axis=1)
+        # batch = tf.shape(mu)[0]
+        # sample_all = tf.zeros(shape=(batch, 0))
+        # for feature in range(z_dims):
+        #     sample = tf.compat.v1.random_normal(shape=(batch, 1))
+        #     sample_all = tf.concat((sample_all, sample), axis=1)
+        # z = mu + tf.multiply(sample_all, tf.math.sqrt(tf.exp(log_var)))
+        sample_all = tf.compat.v1.random_normal(tf.shape(mu), 0, 1, dtype=tf.float32)
         z = mu + tf.multiply(sample_all, tf.math.sqrt(tf.exp(log_var)))
         return z
 

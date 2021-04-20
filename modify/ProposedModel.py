@@ -3,17 +3,54 @@ import numpy as np
 from data import DataSet
 import os
 import warnings
-from tensorflow_core.python.keras.models import Model
+from tensorflow.keras.models import Model
 from test import Post, Prior, HawkesProcess, Encoder, Decoder, test_test
 from scipy import stats
 from bayes_opt import BayesianOptimization
+from scipy.spatial.distance import cdist
 
 
-warnings.filterwarnings(action='once')
+warnings.filterwarnings(action='ignore')
+
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 gpus = tf.config.experimental.list_physical_devices(device_type='GPU')
 for gpu in gpus:
     tf.config.experimental.set_memory_growth(gpu, True)
+
+
+def DynamicTimeWarping(ptSetA, ptSetB):
+    # 获得点集ptSetA中点的个数n
+    n = ptSetA.shape[0]
+    # 获得点集ptSetB中点的个数m
+    m = ptSetB.shape[0]
+    # 计算任意两个点的距离矩阵
+    disMat = cdist(ptSetA, ptSetB, metric='euclidean')
+    # 初始化消耗矩阵
+    costMatrix = np.full((n,m),-1.0)
+    # 递归求解DTW距离
+    dtwDis = _dtw(disMat,costMatrix,n-1,m-1)
+    return dtwDis
+
+
+def _dtw(disMat,costMatrix,i,j):
+    # 如果costMatrix[i][j]不等于-1，直接返回，不需要计算了（借助动态规划的思想）
+    if costMatrix[i][j] > -1:
+        return costMatrix[i][j]
+    # 当i,j都等于0的时候，计算消耗矩阵的值
+    if i == 0 and j == 0:
+        costMatrix[i][j] = disMat[0][0]
+    # 计算第一列的值
+    if i > 0 and j == 0:
+        costMatrix[i][j] = _dtw(disMat, costMatrix, i - 1, 0) + disMat[i][0]
+    # 计算第一行的值
+    if i == 0 and j > 0:
+        costMatrix[i][j] = _dtw(disMat, costMatrix, 0, j - 1) + disMat[0][j]
+    # 计算其他值
+    if i > 0 and j > 0:
+        costMatrix[i][j] = min(_dtw(disMat, costMatrix, i, j-1),
+                               _dtw(disMat, costMatrix, i - 1, j-1),
+                               _dtw(disMat, costMatrix, i - 1, j)) + disMat[i][j]
+    return costMatrix[i][j]
 
 
 class Discriminator(Model):
@@ -96,34 +133,39 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
     # test_set = np.load("../../Trajectory_generate/dataset_file/test_x.npy").reshape(-1, 6, 60)
     # test_set = np.load("../../Trajectory_generate/dataset_file/validate_x_.npy").reshape(-1, 6, 60)
 
-    # train_set = np.load('../../Trajectory_generate/dataset_file/HF_train_.npy').reshape(-1, 6, 30)
-    # test_set = np.load('../../Trajectory_generate/dataset_file/HF_validate_.npy').reshape(-1, 6, 30)
-    # test_set = np.load('../../Trajectory_generate/dataset_file/HF_test_.npy').reshape(-1, 6, 30)
+    # train_set = np.load('../../Trajectory_generate/dataset_file/HF_train_.npy').reshape(-1, 6, 30)[:, :, :]
+    # test_set = np.load('../../Trajectory_generate/dataset_file/HF_validate_.npy').reshape(-1, 6, 30)[:, :, :]
+    # test_set = np.load('../../Trajectory_generate/dataset_file/HF_test_.npy').reshape(-1, 6, 30)[:, :, :]
 
-    train_set = np.load("../../Trajectory_generate/dataset_file/mimic_train_x_.npy").reshape(-1, 6, 37)
-    test_set = np.load("../../Trajectory_generate/dataset_file/mimic_test_x_.npy").reshape(-1, 6, 37)
-    # test_set = np.load("../../Trajectory_generate/dataset_file/mimic_validate_.npy").reshape(-1, 6, 37)
+    # train_set = np.load("../../Trajectory_generate/dataset_file/mimic_train_x_.npy").reshape(-1, 6, 37)
+    # test_set = np.load("../../Trajectory_generate/dataset_file/mimic_test_x_.npy").reshape(-1, 6, 37)
+    # # test_set = np.load("../../Trajectory_generate/dataset_file/mimic_validate_.npy").reshape(-1, 6, 37)
+
+    # sepsis mimic dataset
+    train_set = np.load('../../Trajectory_generate/dataset_file/sepsis_mimic_train.npy').reshape(-1, 13, 40)
+    # test_set = np.load('../../Trajectory_generate_dataset_file/sepsis_mimic_test.npy').reshape(-1, 13, 40)[:1072,:, : ]
+    test_set = np.load('../../Trajectory_generate/dataset_file/sepsis_mimic_validate.npy').reshape(-1, 13, 40)
 
     previous_visit = 3
-    predicted_visit = 3
+    predicted_visit = 10
 
     feature_dims = train_set.shape[2] - 1
 
     train_set = DataSet(train_set)
     train_set.epoch_completed = 0
     batch_size = 64
-    epochs = 1
+    epochs = 50
 
-    # hidden_size = 2**(int(hidden_size))
-    # z_dims = 2**(int(z_dims))
-    # l2_regularization = 10 ** l2_regularization
-    # learning_rate = 10 ** learning_rate
-    # n_disc = int(n_disc)
-    # generated_mse_imbalance = 10 ** generated_mse_imbalance
-    # generated_loss_imbalance = 10 ** generated_loss_imbalance
-    # kl_imbalance = 10 ** kl_imbalance
-    # reconstruction_mse_imbalance = 10 ** reconstruction_mse_imbalance
-    # likelihood_imbalance = 10 ** likelihood_imbalance
+    hidden_size = 2**(int(hidden_size))
+    z_dims = 2**(int(z_dims))
+    l2_regularization = 10 ** l2_regularization
+    learning_rate = 10 ** learning_rate
+    n_disc = int(n_disc)
+    generated_mse_imbalance = 10 ** generated_mse_imbalance
+    generated_loss_imbalance = 10 ** generated_loss_imbalance
+    kl_imbalance = 10 ** kl_imbalance
+    reconstruction_mse_imbalance = 10 ** reconstruction_mse_imbalance
+    likelihood_imbalance = 10 ** likelihood_imbalance
 
     print('feature_dims---{}'.format(feature_dims))
 
@@ -145,8 +187,6 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
     prior_net = Prior(z_dims=z_dims)
 
     hawkes_process = HawkesProcess()
-
-
     loss = 0
     count = 0
     optimizer_generation = tf.keras.optimizers.RMSprop(learning_rate=learning_rate)
@@ -272,16 +312,9 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
         optimizer_generation.apply_gradients(zip(gradient_gen, variables))
 
         if train_set.epoch_completed % 1 == 0 and train_set.epoch_completed not in logged:
-            encode_share.load_weights('encode_share_3_3_mimic.h5')
-            decoder_share.load_weights('decode_share_3_3_mimic.h5')
-            discriminator.load_weights('discriminator_3_3_mimic.h5')
-            post_net.load_weights('post_net_3_3_mimic.h5')
-            prior_net.load_weights('prior_net_3_3_mimic.h5')
-            hawkes_process.load_weights('hawkes_process_3_3_mimic.h5')
 
             logged.add(train_set.epoch_completed)
             loss_pre = generated_mse_loss
-
             mse_generated = tf.reduce_mean(tf.keras.losses.mse(input_x_train[:, previous_visit:previous_visit+predicted_visit, :], generated_trajectory))
 
             loss_diff = loss_pre - mse_generated
@@ -333,17 +366,13 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
             mae_generated_test = tf.reduce_mean(tf.keras.losses.mae(input_x_test[:, previous_visit:previous_visit+predicted_visit, :], generated_trajectory_test))
 
             r_value_all = []
-            p_value_all = []
-
-            for r in range(predicted_visit):
-                x_ = tf.reshape(input_x_test[:, previous_visit + r, :], (-1,))
-                y_ = tf.reshape(generated_trajectory_test[:, r, :], (-1,))
-                if (y_.numpy() == np.zeros_like(y_)).all():
-                    r_value_ = [0.0, 0.0]
-                else:
-                    r_value_ = stats.pearsonr(x_, y_)
-                r_value_all.append(r_value_[0])
-                p_value_all.append(r_value_[1])
+            for patient in range(batch_test):
+                r_value = 0.0
+                for feature in range(feature_dims):
+                    x_ = input_x_test[patient, previous_visit:previous_visit+predicted_visit, feature].numpy().reshape(predicted_visit, 1)
+                    y_ = generated_trajectory_test[patient, :, feature].numpy().reshape(predicted_visit, 1)
+                    r_value += DynamicTimeWarping(x_, y_)
+                r_value_all.append(r_value/29.0)
 
             print('epoch ---{}---train_mse_generated---{}---likelihood_loss{}---'
                   'train_mse_reconstruct---{}---train_kl---{}---'
@@ -351,93 +380,55 @@ def train(hidden_size, z_dims, l2_regularization, learning_rate, n_disc, generat
                   'r_value_test---{}---count---{}'.format(train_set.epoch_completed, generated_mse_loss, likelihood_loss,
                                                           reconstructed_mse_loss, kl_loss,
                                                           mse_generated_test, mae_generated_test,
-                                                          np.mean(r_value_all), count))
-
-            # if np.mean(r_value_all) > 0.9355:
-            #     np.savetxt('generated_trajectory_test.csv', generated_trajectory_test.numpy().reshape(-1, feature_dims), delimiter=',')
-            #     print('保存成功！')
-
-            # if mse_generated_test < 0.0107:
-            #     encode_share.save_weights('encode_share_3_3_mimic.h5')
-            #     decoder_share.save_weights('decode_share_3_3_mimic.h5')
-            #     discriminator.save_weights('discriminator_3_3_mimic.h5')
-            #     post_net.save_weights('post_net_3_3_mimic.h5')
-            #     prior_net.save_weights('prior_net_3_3_mimic.h5')
-            #     hawkes_process.save_weights('hawkes_process_3_3_mimic.h5')
-            #     print('保存成功！')
-
+                                                          np.mean(r_value_all),
+                                                          count))
     tf.compat.v1.reset_default_graph()
-    return mse_generated_test, mae_generated_test, np.mean(r_value_all)
-    # return -1 * mse_generated_test
+    # return mse_generated_test, mae_generated_test, np.mean(r_value_all)
+    return -1 * mse_generated_test
 
 
 if __name__ == '__main__':
-    test_test('VAE_Hawkes_GAN_HF_MIMIC_3_3_重新训练——8——27.txt')
-    # BO = BayesianOptimization(
-    #     train, {
-    #         'hidden_size': (5, 8),
-    #         'z_dims': (5, 8),
-    #         'n_disc': (1, 10),
-    #         'learning_rate': (-5, 1),
-    #         'l2_regularization': (-5, 1),
-    #         'kl_imbalance':  (-6, 1),
-    #         'reconstruction_mse_imbalance': (-6, 1),
-    #         'generated_mse_imbalance': (-6, 1),
-    #         'likelihood_imbalance': (-6, 1),
-    #         'generated_loss_imbalance': (-6, 1),
-    #
-    #     }
-    # )
-    # BO.maximize()
-    # print(BO.max)
+    test_test('VAE_Hawkes_GAN_SEPSIS_重新训练_DTW_train.txt')
+    BO = BayesianOptimization(
+        train, {
+            'hidden_size': (5, 8),
+            'z_dims': (5, 8),
+            'n_disc': (1, 10),
+            'learning_rate': (-5, 1),
+            'l2_regularization': (-5, 1),
+            'kl_imbalance':  (-6, 1),
+            'reconstruction_mse_imbalance': (-6, 1),
+            'generated_mse_imbalance': (-6, 1),
+            'likelihood_imbalance': (-6, 1),
+            'generated_loss_imbalance': (-6, 1),
 
-    mse_all = []
-    r_value_all = []
-    mae_all = []
-    for i in range(50):
-        mse, mae, r_value = train(hidden_size=32,
-                                  z_dims=64,
-                                  learning_rate=0.007122273166129031,
-                                  l2_regularization=8.931354194538156e-05,
-                                  n_disc=3,
-                                  generated_mse_imbalance=0.23927614146670084,
-                                  generated_loss_imbalance=0.03568210662431517,
-                                  kl_imbalance=0.00462105286455568,
-                                  reconstruction_mse_imbalance=0.003925185127256372,
-                                  likelihood_imbalance=2.3046966638597164)
-        mse_all.append(mse)
-        r_value_all.append(r_value)
-        mae_all.append(mae)
-        print("epoch---{}---r_value_ave  {}  mse_all_ave {}  mae_all_ave  {}  "
-              "r_value_std {}----mse_all_std  {}  mae_std {}".
-              format(i, np.mean(r_value_all), np.mean(mse_all), np.mean(mae_all),
-                     np.std(r_value_all), np.std(mse_all), np.std(mae_all)))
+        }
+    )
+    BO.maximize()
+    print(BO.max)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    # mse_all = []
+    # r_value_all = []
+    # r_value_spearman_all = []
+    # r_value_kendalltau_all = []
+    # mae_all = []
+    # for i in range(50):
+    #     mse, mae, r_value = \
+    #         train(hidden_size=128,
+    #               z_dims=64,
+    #               learning_rate=0.006560847653117593,
+    #               l2_regularization=0.003333332892503538,
+    #               n_disc=1,
+    #               generated_mse_imbalance=0.0012593367677205505,
+    #               generated_loss_imbalance=1.4466715033445655e-06,
+    #               kl_imbalance=0.001141739845933755,
+    #               reconstruction_mse_imbalance=2.1076116689644313,
+    #               likelihood_imbalance=0.02252070055836029)
+    #     mse_all.append(mse)
+    #     r_value_all.append(r_value)
+    #     mae_all.append(mae)
+    #     print("epoch---{}---r_value_ave  {}  mse_all_ave {}  mae_all_ave  {}  "
+    #           "r_value_std {}----mse_all_std  {}  mae_std {}".
+    #           format(i, np.mean(r_value_all), np.mean(mse_all), np.mean(mae_all),
+    #                  np.std(r_value_all), np.std(mse_all), np.std(mae_all)))
 
